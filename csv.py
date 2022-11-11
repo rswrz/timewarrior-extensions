@@ -16,11 +16,13 @@ for line in sys.stdin:
 total_active_time = 0
 
 j = json.loads(doc)
+
+delimiter = ','
+head_line= delimiter.join(["Start","End","Annotation","Tags"])
+print(head_line)
+
 for object in j:
     line = '"{}","{}"'.format(object['start'], (object['end'] if 'end' in object else ''))
-
-    if 'tags' in object:
-        for tag in object['tags']:
-            line += ',"{}"'.format(tag)
-
+    line += ',"{}"'.format(object['annotation'] if 'annotation' in object else '')
+    line += ',"{}"'.format(' '.join(object['tags'] if 'tags' in object else []))
     print(line)
