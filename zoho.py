@@ -7,7 +7,9 @@ import sys
 import os
 
 
-def calculate_working_time(datetime_start: datetime, datetime_end:datetime, multiplier=1):
+def calculate_working_time(
+    datetime_start: datetime, datetime_end: datetime, multiplier=1
+):
     datetime_delta = datetime_end - datetime_start
     total_seconds = datetime_delta.total_seconds()
     total_seconds_multiplied = total_seconds * multiplier
@@ -113,13 +115,30 @@ if __name__ == "__main__":
         start = datetime.strptime(track["start"], timew_datetime_format)
         end = datetime.strptime(track["end"], timew_datetime_format)
         time_spend = calculate_working_time(start, end, multiplier)
-        
+
         date_string = start.astimezone().strftime("%Y-%m-%d")
         # start_string = start.astimezone().strftime('%H:%M:%S')
         # end_string = start.astimezone().strftime('%H:%M:%S')
         time_spend_string = str(time_spend)[:-3]
 
-        data.append([date_string, time_spend_string, project_name, task_name, notes])
+        for i, d in enumerate(data):
+            # print("-->", d[0], d[2], d[3], d[4])
+            if (
+                d[0] == date_string
+                and d[2] == project_name
+                and d[3] == task_name
+                and d[4] == notes
+            ):
+                t = datetime.strptime(d[1], "%H:%M")
+                d = timedelta(hours=t.hour, minutes=t.minute)
+                d_new = d + time_spend
+                d_new_string = str(d_new)[:-3]
+                data[i] = [date_string, d_new_string, project_name, task_name, notes]
+                break
+        else:
+            data.append(
+                [date_string, time_spend_string, project_name, task_name, notes]
+            )
 
     #
     # stdout
