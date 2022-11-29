@@ -106,7 +106,7 @@ if __name__ == "__main__":
         project = get_project_and_task(tags)
         project_name = project["project_name"]
         task_name = project["task_name"]
-        multiplier = int(project["multiplier"]) if "multiplier" in project else 1
+        multiplier = float(project["multiplier"]) if "multiplier" in project else 1
 
         # start, end, worktime
         timew_datetime_format = "%Y%m%dT%H%M%S%z"
