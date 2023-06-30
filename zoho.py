@@ -108,6 +108,7 @@ if __name__ == "__main__":
         project = get_project_and_task(tags)
         project_name = project["project_name"]
         task_name = project["task_name"]
+        billable_status = "Billable" if project.get("billable") == True else "Non Billable"
         multiplier = float(project["multiplier"]) if "multiplier" in project else 1
 
         # start, end, worktime
@@ -133,17 +134,17 @@ if __name__ == "__main__":
                 d = timedelta(hours=t.hour, minutes=t.minute)
                 d_new = d + time_spend
                 d_new_string = str(d_new)[:-3]
-                data[i] = [date_string, d_new_string, project_name, task_name, notes]
+                data[i] = [date_string, d_new_string, project_name, task_name, billable_status, notes]
                 break
         else:
             data.append(
-                [date_string, time_spend_string, project_name, task_name, notes]
+                [date_string, time_spend_string, project_name, task_name, billable_status, notes]
             )
 
     #
     # stdout
     #
 
-    print_line(["Date", "Time Spent", "Project Name", "Task Name", "Notes"])
+    print_line(["Date", "Time Spent", "Project Name", "Task Name", "Billable Status", "Notes"])
     for d in data:
         print_line(d)
