@@ -102,7 +102,7 @@ if __name__ == "__main__":
         tags_list = ", ".join(f"{t}" for t in tags)
 
         # Annotations as notes
-        notes = track["annotation"] if "annotation" in track else ""
+        notes = track["annotation"].replace(";", "\n") if "annotation" in track else ""
 
         # Get Zoho project and task named based on tags
         project = get_project_and_task(tags)
