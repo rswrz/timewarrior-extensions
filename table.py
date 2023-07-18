@@ -63,8 +63,9 @@ for object in j:
 
     start = start_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S")
     end = end_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S") if end_date else " "
-    time = str(timedelta(seconds=(end_date - start_date).total_seconds())) if end_date else " "
-
+    _time = timedelta(seconds=(end_date - start_date).total_seconds()) if end_date else timedelta(seconds=(datetime.now(tz=timezone.utc).replace(microsecond=0) - start_date).total_seconds())
+    time = str(_time)
+    
     _annotation = object["annotation"].replace("; ", "\n") if "annotation" in object else "---"
     for i, value in enumerate(_annotation.split("\n")):
         annotation = value.strip()
