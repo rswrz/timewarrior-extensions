@@ -4,10 +4,15 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone, time
 
-# Skip the configuration settings.
+# Save the configuration settings.
+conf = {}
 for line in sys.stdin:
     if line == '\n':
         break
+    l_split = line.split(": ")
+    key = l_split[0]
+    value = ": ".join(l_split[1:]).replace('\n', '')
+    conf[key] = value
 
 # Extract the JSON.
 doc = ''
