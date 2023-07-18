@@ -35,14 +35,16 @@ for object in j:
         if i > 0: annotation_len += 2
         max_annotation_len = annotation_len if annotation_len > max_annotation_len else max_annotation_len
 
-layout = f"{{:<3}} {{:<10}} {{:<3}} {{:<{max_id_len}}} {{:<{max_tags_len}}} {{:<{max_annotation_len}}} {{:>8}} {{:>8}} {{:>8}}"
+layout = f"{{:<3}} {{:<10}} {{:<3}} {{:<{max_id_len}}} {{:<{max_tags_len}}} {{:<{max_annotation_len}}} {{:>8}} {{:>8}} {{:>8}} {{:>8}}"
 layout_head = "\033[4m" + "\033[0m \033[4m".join(layout.split(" ")) + "\033[0m"
 
-print (layout_head.format('Wk', 'Date', 'Day', 'ID','Tags','Annotation','Start','End','Time'))
+print (layout_head.format('Wk', 'Date', 'Day', 'ID','Tags','Annotation','Start','End','Time', 'Total'))
 
 prev = {}
-for object in j:
+total_day = timedelta()
+total_all = timedelta()
 
+for i, object in enumerate(j):
     date_format = "%Y%m%dT%H%M%S%z"
     start_date = datetime.strptime(object["start"], date_format)
     end_date = datetime.strptime(object["end"], date_format) if "end" in object else None
@@ -65,13 +67,23 @@ for object in j:
     end = end_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S") if end_date else "-"
     _time = timedelta(seconds=(end_date - start_date).total_seconds()) if end_date else timedelta(seconds=(datetime.now(tz=timezone.utc).replace(microsecond=0) - start_date).total_seconds())
     time = str(_time)
+
+    nxt = i + 1
+    prv = i - 1
+    if prv > 0 and prv <= len(j) and datetime.strptime(j[prv]["start"], date_format).date() < start_date.date():
+        total_day = timedelta()
+    total_day += _time
+
+    total_all += _time
+
+    total = str(total_day) if (nxt > 0 and nxt < len(j) and datetime.strptime(j[nxt]["start"], date_format).date() > start_date.date()) or i+1 == len(j) else " "
     
     _annotation = object["annotation"].replace("; ", "\n") if "annotation" in object else "-"
     for i, value in enumerate(_annotation.split("\n")):
         annotation = value.strip()
         if i == 0:
             if annotation == "-": print('\033[91m', end="")
-            print (layout.format(week, date, day, id, tags, annotation, start, end, time))
+            print (layout.format(week, date, day, id, tags, annotation, start, end, time, total))
             if annotation == "-": print('\033[0m', end="")
         else:
             space = ' '
@@ -79,3 +91,16 @@ for object in j:
             print ((space * multiplier) + annotation)
     
     prev = object
+
+
+def format_timedelta(td):
+    minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
+    hours, minutes = divmod(minutes, 60)
+    return '{:d}:{:02d}:{:02d}'.format(hours, minutes, seconds)
+
+spaces = (3 + 1) + (10 + 1) + (3 + 1) + (max_id_len + 1) + (max_tags_len + 1) + (max_annotation_len + 1) + (8 + 1) + (8 + 1) + (8 + 1) + (8)
+total_all_str = format_timedelta(total_all)
+underline_start = "\033[4m"
+underline_end = "\033[0m"
+print(f"{{:>{spaces + len(underline_start)}}}".format(underline_start + (len(total_all_str) * ' ')) + underline_end)
+print(f"{{:>{spaces}}}".format(total_all_str))
