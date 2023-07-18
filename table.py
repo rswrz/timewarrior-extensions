@@ -79,16 +79,20 @@ for i, object in enumerate(j):
     total = str(total_day) if (nxt > 0 and nxt < len(j) and datetime.strptime(j[nxt]["start"], date_format).date() > start_date.date()) or i+1 == len(j) else " "
     
     _annotation = object["annotation"].replace("; ", "\n") if "annotation" in object else "-"
-    for i, value in enumerate(_annotation.split("\n")):
+    for ii, value in enumerate(_annotation.split("\n")):
         annotation = value.strip()
-        if i == 0:
-            if annotation == "-": print('\033[91m', end="")
-            print (layout.format(week, date, day, id, tags, annotation, start, end, time, total))
-            if annotation == "-": print('\033[0m', end="")
+        if ii == 0:
+            if annotation == "-": print('\033[38;2;231;120;106m', end="")
+            elif i % 2 == 0: print('\033[48;2;26;26;26m', end="")
+            print (layout.format(week, date, day, id, tags, annotation, start, end, time, total), end="")
+            if i % 2 == 0 or annotation == "-": print("\033[0m")
+            else: print("")
         else:
-            space = ' '
-            multiplier = (3+1) + (10+1) + (3+1) + (max_id_len + 1) + (max_tags_len + 1) + 2
-            print ((space * multiplier) + annotation)
+            if i % 2 == 0: print('\033[48;2;26;26;26m', end="")
+            spaces = (3+1) + (10+1) + (3+1) + (max_id_len + 1) + (max_tags_len + 1) + 2
+            print (layout.format(" ", " ", " ", " ", " ", annotation, " ", " ", " ", " "), end="")
+            if i % 2 == 0: print("\033[0m")
+            else: print("")
     
     prev = object
 
