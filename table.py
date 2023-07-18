@@ -83,7 +83,7 @@ for i, object in enumerate(j):
         annotation = value.strip()
         if ii == 0:
             if annotation == "-": print('\033[38;2;231;120;106m', end="")
-            elif i % 2 == 0: print('\033[48;2;26;26;26m', end="")
+            if i % 2 == 0: print('\033[48;2;26;26;26m', end="")
             print (layout.format(week, date, day, id, tags, annotation, start, end, time, total), end="")
             if i % 2 == 0 or annotation == "-": print("\033[0m")
             else: print("")
