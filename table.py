@@ -35,7 +35,7 @@ for object in j:
         if i > 0: annotation_len += 2
         max_annotation_len = annotation_len if annotation_len > max_annotation_len else max_annotation_len
 
-layout = f"{{:<3}} {{:<10}} {{:<3}} {{:<{max_id_len}}} {{:<{max_tags_len}}} {{:<{max_annotation_len}}} {{:<8}} {{:<8}} {{:<8}}"
+layout = f"{{:<3}} {{:<10}} {{:<3}} {{:<{max_id_len}}} {{:<{max_tags_len}}} {{:<{max_annotation_len}}} {{:>8}} {{:>8}} {{:>8}}"
 layout_head = "\033[4m" + "\033[0m \033[4m".join(layout.split(" ")) + "\033[0m"
 
 print (layout_head.format('Wk', 'Date', 'Day', 'ID','Tags','Annotation','Start','End','Time'))
@@ -62,15 +62,17 @@ for object in j:
     tags = ", ".join(f"{tag}" for tag in tags_list)
 
     start = start_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S")
-    end = end_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S") if end_date else " "
+    end = end_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S") if end_date else "-"
     _time = timedelta(seconds=(end_date - start_date).total_seconds()) if end_date else timedelta(seconds=(datetime.now(tz=timezone.utc).replace(microsecond=0) - start_date).total_seconds())
     time = str(_time)
     
-    _annotation = object["annotation"].replace("; ", "\n") if "annotation" in object else "---"
+    _annotation = object["annotation"].replace("; ", "\n") if "annotation" in object else "-"
     for i, value in enumerate(_annotation.split("\n")):
         annotation = value.strip()
         if i == 0:
+            if annotation == "-": print('\033[91m', end="")
             print (layout.format(week, date, day, id, tags, annotation, start, end, time))
+            if annotation == "-": print('\033[0m', end="")
         else:
             space = ' '
             multiplier = (3+1) + (10+1) + (3+1) + (max_id_len + 1) + (max_tags_len + 1) + 2
