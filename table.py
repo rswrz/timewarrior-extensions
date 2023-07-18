@@ -2,7 +2,7 @@
 
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Skip the configuration settings.
 for line in sys.stdin:
@@ -27,7 +27,7 @@ for object in j:
 
     date_format = "%Y%m%dT%H%M%S%z"
     start_date = datetime.strptime(object["start"], date_format)
-    end_date = datetime.strptime(object["end"], date_format)
+    end_date = datetime.strptime(object["end"], date_format) if "end" in object else None
 
     _week = start_date.isocalendar().week
     week = _week if "start" not in prev or ("start" in prev and _week != datetime.strptime(prev["start"], date_format).isocalendar().week) else ""
@@ -45,9 +45,9 @@ for object in j:
 
     annotation = object["annotation"].replace(";", "\n") if "annotation" in object else ""
 
-    start = start_date.strftime("%H:%M:%S")
-    end = end_date.strftime("%H:%M:%S") if "end" in object else " "
-    time = str(timedelta(seconds=(end_date - start_date).total_seconds()))  if "end" in object else " "
+    start = start_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S")
+    end = end_date.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S") if end_date else " "
+    time = str(timedelta(seconds=(end_date - start_date).total_seconds())) if end_date else " "
 
     for i, value in enumerate(annotation.split("\n")):
         if i == 0:
