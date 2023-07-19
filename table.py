@@ -20,9 +20,9 @@ for line in sys.stdin:
     doc += line
 j = json.loads(doc)
 
-max_tags_len = 0
-max_id_len = 0
-max_annotation_len = 0
+max_tags_len = len("Tags")
+max_id_len = len("ID")
+max_annotation_len = len("Annotation")
 
 for object in j:
     tags_list = object["tags"] if "tags" in object else []
