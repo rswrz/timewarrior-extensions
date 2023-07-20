@@ -38,7 +38,8 @@ for object in j:
     for i, value in enumerate(annotation.split("\n")):
         annotation_len = len(value.strip())
         if i > 0: annotation_len += 2
-        max_annotation_len = annotation_len if annotation_len > max_annotation_len else max_annotation_len
+        if annotation_len > max_annotation_len: max_annotation_len = annotation_len
+        if annotation_len > 100: max_annotation_len = 100
 
 layout = f"{{:<3}} {{:<10}} {{:<3}} {{:<{max_id_len}}} {{:<{max_tags_len}}} {{:<{max_annotation_len}}} {{:>8}} {{:>8}} {{:>8}} {{:>8}}"
 layout_head = "\033[4m" + "\033[0m \033[4m".join(layout.split(" ")) + "\033[0m"
@@ -84,8 +85,17 @@ for i, object in enumerate(j):
     total = str(total_day) if (nxt > 0 and nxt < len(j) and datetime.strptime(j[nxt]["start"], date_format).date() > start_date.date()) or i+1 == len(j) else " "
     
     _annotation = object["annotation"].replace("; ", "\n") if "annotation" in object else "-"
-    for ii, value in enumerate(_annotation.split("\n")):
-        annotation = value.strip()
+
+    _annotation_split_newline = _annotation.split("\n")
+    max_len=100
+    for a in _annotation_split_newline:
+        if len(a) > max_len:
+            pos = _annotation_split_newline.index(a)
+            temp = [a[i:i+max_len] for i in range(0, len(a), max_len)]
+            _annotation_split_newline[pos:pos+1] = [temp[0]] + ["  " + t for i,t in enumerate(temp) if i > 0]
+
+    for ii, value in enumerate(_annotation_split_newline):
+        annotation = value
         if ii == 0:
             if annotation == "-": print('\033[38;2;238;162;87m', end="")
             if i % 2 != 0: print('\033[48;2;26;26;26m', end="")
