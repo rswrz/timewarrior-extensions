@@ -28,7 +28,6 @@ def csv_escape_special_chars(text):
 
 
 def get_project_and_task(tags):
-
     # Open project config file
     zoho_config_json = os.getenv(
         "TIMEWARRIOR_EXT_ZOHO_CONFIG_JSON", ".zoho_config.json"
@@ -72,7 +71,6 @@ def print_line(list):
 
 
 if __name__ == "__main__":
-
     #
     # stdin
     #
@@ -95,7 +93,6 @@ if __name__ == "__main__":
 
     data = []
     for track in json_doc:
-
         # Skip if time track entry has not ended yet
         if "end" not in track:
             continue
@@ -105,13 +102,15 @@ if __name__ == "__main__":
         tags_list = ", ".join(f"{t}" for t in tags)
 
         # Annotations as notes
-        notes = track["annotation"].replace(";", "\n") if "annotation" in track else ""
+        notes = track["annotation"].replace("; ", "\n") if "annotation" in track else ""
 
         # Get Zoho project and task named based on tags
         project = get_project_and_task(tags)
         project_name = project["project_name"]
         task_name = project["task_name"]
-        billable_status = "Billable" if project.get("billable") == True else "Non Billable"
+        billable_status = (
+            "Billable" if project.get("billable") == True else "Non Billable"
+        )
         multiplier = float(project["multiplier"]) if "multiplier" in project else 1
 
         if "note_prefix" in project:
@@ -140,17 +139,33 @@ if __name__ == "__main__":
                 d = timedelta(hours=t.hour, minutes=t.minute)
                 d_new = d + time_spend
                 d_new_string = str(d_new)[:-3]
-                data[i] = [date_string, d_new_string, project_name, task_name, billable_status, notes]
+                data[i] = [
+                    date_string,
+                    d_new_string,
+                    project_name,
+                    task_name,
+                    billable_status,
+                    notes,
+                ]
                 break
         else:
             data.append(
-                [date_string, time_spend_string, project_name, task_name, billable_status, notes]
+                [
+                    date_string,
+                    time_spend_string,
+                    project_name,
+                    task_name,
+                    billable_status,
+                    notes,
+                ]
             )
 
     #
     # stdout
     #
 
-    print_line(["Date", "Time Spent", "Project Name", "Task Name", "Billable Status", "Notes"])
+    print_line(
+        ["Date", "Time Spent", "Project Name", "Task Name", "Billable Status", "Notes"]
+    )
     for d in data:
         print_line(d)
