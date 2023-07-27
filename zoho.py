@@ -30,7 +30,10 @@ def csv_escape_special_chars(text):
 def get_project_and_task(tags):
 
     # Open project config file
-    f = open(os.path.join(sys.path[0], ".zoho_config.json"))
+    zoho_config_json = os.getenv(
+        "TIMEWARRIOR_EXT_ZOHO_CONFIG_JSON", ".zoho_config.json"
+    )
+    f = open(os.path.join(sys.path[0], zoho_config_json))
     project_identifier = json.load(f)
 
     # Get the project with the most matching tags
