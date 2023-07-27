@@ -114,6 +114,9 @@ if __name__ == "__main__":
         billable_status = "Billable" if project.get("billable") == True else "Non Billable"
         multiplier = float(project["multiplier"]) if "multiplier" in project else 1
 
+        if "note_prefix" in project:
+            notes = project["note_prefix"] + "\n" + notes
+
         # start, end, worktime
         timew_datetime_format = "%Y%m%dT%H%M%S%z"
         start = datetime.strptime(track["start"], timew_datetime_format)
