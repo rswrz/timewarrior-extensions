@@ -128,12 +128,12 @@ if __name__ == "__main__":
         time_spend_string = str(time_spend)[:-3]
 
         for i, d in enumerate(data):
-            # print("-->", d[0], d[2], d[3], d[4])
+            # print("-->", d[0], d[2], d[3], d[5])
             if (
                 d[0] == date_string
                 and d[2] == project_name
                 and d[3] == task_name
-                and d[4] == notes
+                and d[5] == notes
             ):
                 t = datetime.strptime(d[1], "%H:%M")
                 d = timedelta(hours=t.hour, minutes=t.minute)
