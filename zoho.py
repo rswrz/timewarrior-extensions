@@ -163,6 +163,11 @@ if __name__ == "__main__":
 
                 note_items_without_title = ";\n".join(notes.split(";\n")[1:])
                 merged_notes = ";\n".join([d[5], note_items_without_title])
+                uniq_merged_notes = []
+                for n in merged_notes.split(";\n"):
+                    if n not in uniq_merged_notes:
+                        uniq_merged_notes.append(n)
+                uniq_merged_notes_string = ";\n".join(uniq_merged_notes)
 
                 data[i] = [
                     date_string,
@@ -170,7 +175,7 @@ if __name__ == "__main__":
                     project_name,
                     task_name,
                     billable_status,
-                    merged_notes,
+                    uniq_merged_notes_string,
                 ]
                 break
         else:
