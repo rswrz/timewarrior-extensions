@@ -148,6 +148,29 @@ if __name__ == "__main__":
                     notes,
                 ]
                 break
+            elif (
+                d[0] == date_string
+                and d[2] == project_name
+                and d[3] == task_name
+                and d[5].split(";\n")[0] == notes.split(";\n")[0]
+            ):
+                t = datetime.strptime(d[1], "%H:%M")
+                dd = timedelta(hours=t.hour, minutes=t.minute)
+                d_new = dd + time_spend
+                d_new_string = str(d_new)[:-3]
+
+                note_items_without_title = ";\n".join(notes.split(";\n")[1:])
+                merged_notes = ";\n".join([d[5], note_items_without_title])
+
+                data[i] = [
+                    date_string,
+                    d_new_string,
+                    project_name,
+                    task_name,
+                    billable_status,
+                    merged_notes,
+                ]
+                break
         else:
             data.append(
                 [
