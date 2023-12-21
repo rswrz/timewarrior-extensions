@@ -109,7 +109,7 @@ for i, object in enumerate(j):
             if i % 2 != 0: print("\033[0m")
             else: print("")
     
-    if nxt > 0 and nxt < len(j) and "end" in object and object["end"] != j[nxt]["start"] and datetime.strptime(j[nxt]["start"], date_format).date() <= start_date.date() and datetime.strptime(j[nxt]["start"], date_format).replace(tzinfo=timezone.utc).astimezone(tz=None).time() < datetime.strptime(j[nxt]["start"], date_format).replace(hour=14,minute=0,tzinfo=timezone.utc).astimezone(tz=None).time():
+    if nxt > 0 and nxt < len(j) and "end" in object and object["end"] != j[nxt]["start"] and datetime.strptime(j[nxt]["start"], date_format).date() <= start_date.date():
         # print('\033[48;2;7;12;82m', end="")
         print('\033[38;2;85;85;85m', end="")
         print (layout.format(" ", " ", " ", "-", "-", "-", end, datetime.strptime(j[nxt]["start"], date_format).replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S"), str(timedelta(seconds=(datetime.strptime(j[nxt]["start"], date_format) - end_date).total_seconds())), " "), end="")
