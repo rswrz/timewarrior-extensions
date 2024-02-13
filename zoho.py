@@ -66,6 +66,7 @@ def get_project_and_task(tags):
 
 def print_line(list):
     delimiter = ","
+    list[5] = ";\n".join([element for element in list[5].split(";\n") if not (element.startswith('++') and element.endswith('++'))])
     line = delimiter.join(f'"{csv_escape_special_chars(item)}"' for item in list)
     print(line)
 
