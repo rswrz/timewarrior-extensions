@@ -1,3 +1,18 @@
+# Timewarrior Extensions
+
+A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](https://timewarrior.net/docs/extensions/) to enhance my time tracking workflow.
+
+## Useful Aliases & Functions
+
+For a set of helpful aliases and shell functions, visit the <https://github.com/rswrz/timewarrior>.
+
+## 🧪 Experimentation
+
+### Use `jq` for data manipulation
+
+Source: <https://beko.famkos.net/2021/09/10/exporting-timewarrior-summary-with-duration-and-quarter-hours/>
+
+```shell
 timew export :week |
 jq -r '["id", "start", "end", "duration", "quarter_hours", "description"],
 (.[] |
@@ -17,8 +32,9 @@ jq -r '["id", "start", "end", "duration", "quarter_hours", "description"],
     ]
 ) |
 @csv'
+```
 
-
+```shell
 timew export :month |
 jq -r '["id", "start", "end", "duration", "quarter_hours", "tags", "description"],
 (.[] |
@@ -39,6 +55,4 @@ jq -r '["id", "start", "end", "duration", "quarter_hours", "tags", "description"
     ]
 ) |
 @csv'
-
-
-https://beko.famkos.net/2021/09/10/exporting-timewarrior-summary-with-duration-and-quarter-hours/
+```
