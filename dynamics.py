@@ -178,11 +178,23 @@ if __name__ == "__main__":
         # Get projects project which matches the timewarrior entry tags
         _project = get_project_and_task(timew_tags)
 
-        # Get the project name from the configuration file
-        project = _project["project"] if "project" in _project else ""
+        # Get the project id or name from the configuration file
+        project = (
+            _project["project_id"]
+            if "project_id" in _project
+            else _project["project"]
+            if "project" in _project
+            else ""
+        )
 
-        # Get the project task name from the configuration file
-        project_task = _project["project_task"] if "project_task" in _project else ""
+        # Get the project task id or name from the configuration file
+        project_task = (
+            _project["project_task_id"]
+            if "project_task_id" in _project
+            else _project["project_task"]
+            if "project_task" in _project
+            else ""
+        )
 
         # Get the project role from the configuration file
         project_role = _project["role"] if "role" in _project else ""
