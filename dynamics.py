@@ -9,16 +9,12 @@ import os
 # import ollama
 
 
-def calculate_working_time(
-    datetime_start: datetime, datetime_end: datetime, multiplier=1
-):
+def calculate_working_time(datetime_start: datetime, datetime_end: datetime, multiplier=1):
     datetime_delta = datetime_end - datetime_start
     total_seconds = datetime_delta.total_seconds()
     total_seconds_multiplied = total_seconds * multiplier
 
-    total_minutes_rounded_15m = (
-        math.ceil(round(total_seconds_multiplied / 60) / 15) * 15
-    )
+    total_minutes_rounded_15m = math.ceil(round(total_seconds_multiplied / 60) / 15) * 15
 
     return total_minutes_rounded_15m
 
@@ -30,9 +26,7 @@ def csv_escape_special_chars(text):
 
 def get_project_and_task(tags):
     # Open project config file
-    dynamics_config_json = os.getenv(
-        "TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON", ".dynamics_config.json"
-    )
+    dynamics_config_json = os.getenv("TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON", ".dynamics_config.json")
     f = open(os.path.join(sys.path[0], dynamics_config_json))
     project_identifier = json.load(f)
 
@@ -58,9 +52,7 @@ def get_project_and_task(tags):
         if len(tags) == 0:
             _no_project_note = "NO TAGS DEFINED TO THIS TIME ENTRY"
         else:
-            _no_project_note = "NO PROJECT FOUND FOR THESE TAGS: {}".format(
-                ", ".join(tags)
-            )
+            _no_project_note = "NO PROJECT FOUND FOR THESE TAGS: {}".format(", ".join(tags))
         project = {"project": _no_project_note, "project_task": "-", "role": "-"}
 
     return project
@@ -75,9 +67,7 @@ def print_line(list, annotation_delimiter=None, end=None):
             if not (element.startswith("++") and element.endswith("++"))
         ]
     )
-    line = csv_column_delimiter.join(
-        f'"{csv_escape_special_chars(item)}"' for item in list
-    )
+    line = csv_column_delimiter.join(f'"{csv_escape_special_chars(item)}"' for item in list)
     print(line, end=end)
 
 
@@ -163,9 +153,7 @@ if __name__ == "__main__":
         timew_start = _timew_entry["start"]
         timew_end = _timew_entry["end"]
         timew_tags = _timew_entry["tags"] if "tags" in _timew_entry else []
-        timew_annotation = (
-            _timew_entry["annotation"] if "annotation" in _timew_entry else ""
-        )
+        timew_annotation = _timew_entry["annotation"] if "annotation" in _timew_entry else ""
 
         _timew_datetime_format = "%Y%m%dT%H%M%S%z"
         _datetime_timew_start = datetime.strptime(timew_start, _timew_datetime_format)
@@ -180,11 +168,7 @@ if __name__ == "__main__":
 
         # Get the project id or name from the configuration file
         project = (
-            _project["project_id"]
-            if "project_id" in _project
-            else _project["project"]
-            if "project" in _project
-            else ""
+            _project["project_id"] if "project_id" in _project else _project["project"] if "project" in _project else ""
         )
 
         # Get the project task id or name from the configuration file
@@ -202,11 +186,7 @@ if __name__ == "__main__":
         # Get the time multiplier from configuration file, fallback to 1
         multiplier = float(_project["multiplier"]) if "multiplier" in _project else 1
 
-        merge_on_equal_tags = (
-            bool(_project["merge_on_equal_tags"])
-            if "merge_on_equal_tags" in _project
-            else False
-        )
+        merge_on_equal_tags = bool(_project["merge_on_equal_tags"]) if "merge_on_equal_tags" in _project else False
 
         #
         # Time Entry values
@@ -218,9 +198,7 @@ if __name__ == "__main__":
 
         # DURATION
         # Calculate the time entry duration
-        time_entry_duration = calculate_working_time(
-            _datetime_timew_start, _datetime_timew_end, multiplier
-        )
+        time_entry_duration = calculate_working_time(_datetime_timew_start, _datetime_timew_end, multiplier)
 
         # TYPE
         time_entry_type = "Work"
@@ -238,11 +216,7 @@ if __name__ == "__main__":
         # Set the time entry description from the timewarrior annotation
         # and optionally prefixed with a value from the configuration file
         if "description_prefix" in _project:
-            time_entry_description = (
-                _project["description_prefix"]
-                + timew_annotation_delimiter
-                + timew_annotation
-            )
+            time_entry_description = _project["description_prefix"] + timew_annotation_delimiter + timew_annotation
         else:
             time_entry_description = timew_annotation
 
@@ -297,6 +271,7 @@ if __name__ == "__main__":
                 break
 
             # Merge on same first line – merge_on_equal_tags=True
+
             elif (
                 _date == time_entry_date
                 and _project == time_entry_project
@@ -304,21 +279,16 @@ if __name__ == "__main__":
                 and _role == time_entry_role
                 and _type == time_entry_type
                 and merge_on_equal_tags
-                and len(_description) + len(time_entry_description)
-                <= dynamics_max_description_length
+                and len(_description) + len(time_entry_description) <= dynamics_max_description_length
             ):
                 _time_entry_duration_added_up = int(_duration) + time_entry_duration
 
-                _merged_notes = timew_annotation_delimiter.join(
-                    [_description, time_entry_description]
-                )
+                _merged_notes = timew_annotation_delimiter.join([_description, time_entry_description])
                 _uniq_merged_notes = []
                 for n in _merged_notes.split(timew_annotation_delimiter):
                     if n not in _uniq_merged_notes:
                         _uniq_merged_notes.append(n)
-                _uniq_merged_notes_string = timew_annotation_delimiter.join(
-                    _uniq_merged_notes
-                )
+                _uniq_merged_notes_string = timew_annotation_delimiter.join(_uniq_merged_notes)
 
                 dynamics_time_entries[i] = [
                     time_entry_date,
@@ -333,6 +303,7 @@ if __name__ == "__main__":
                 break
 
             # Merge on same first line
+
             elif (
                 _date == time_entry_date
                 and _project == time_entry_project
@@ -341,24 +312,19 @@ if __name__ == "__main__":
                 and _type == time_entry_type
                 and _description.split(timew_annotation_delimiter)[0]
                 == time_entry_description.split(timew_annotation_delimiter)[0]
-                and len(_description) + len(time_entry_description)
-                <= dynamics_max_description_length
+                and len(_description) + len(time_entry_description) <= dynamics_max_description_length
             ):
                 _time_entry_duration_added_up = int(_duration) + time_entry_duration
 
                 note_items_without_title = timew_annotation_delimiter.join(
                     time_entry_description.split(timew_annotation_delimiter)[1:]
                 )
-                _merged_notes = timew_annotation_delimiter.join(
-                    [_description, note_items_without_title]
-                )
+                _merged_notes = timew_annotation_delimiter.join([_description, note_items_without_title])
                 _uniq_merged_notes = []
                 for n in _merged_notes.split(timew_annotation_delimiter):
                     if n not in _uniq_merged_notes:
                         _uniq_merged_notes.append(n)
-                _uniq_merged_notes_string = timew_annotation_delimiter.join(
-                    _uniq_merged_notes
-                )
+                _uniq_merged_notes_string = timew_annotation_delimiter.join(_uniq_merged_notes)
 
                 dynamics_time_entries[i] = [
                     time_entry_date,
