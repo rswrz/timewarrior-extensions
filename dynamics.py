@@ -6,6 +6,8 @@ import math
 import sys
 import os
 
+# import ollama
+
 
 def calculate_working_time(datetime_start: datetime, datetime_end: datetime, multiplier=1):
     datetime_delta = datetime_end - datetime_start
@@ -67,6 +69,39 @@ def print_line(list, annotation_delimiter=None, end=None):
     )
     line = csv_column_delimiter.join(f'"{csv_escape_special_chars(item)}"' for item in list)
     print(line, end=end)
+
+
+# def improve_description_with_ai(description):
+#     response = ollama.chat(
+#         model="mistral",
+#         options={
+#             "temperature": 0
+#         },
+#         messages=[
+#             {
+#                 "role": "system",
+#                 "content": """
+#                     You are an AI language model designed to process time-tracking entries provided by the user. The user will input one or more time-tracking entries, separated by “; “. Your task is to correct any spelling or grammatical errors while preserving the original meaning.
+
+#                     Instruction:
+#                     - Accept a text input that contains one or more time-tracking entries separated by “; “.
+#                     - Correct any spelling, punctuation, and grammatical mistakes while keeping the structure intact.
+#                     - Do not change the meaning of the entries.
+#                     - Maintain the original format, ensuring that multiple entries remain separated by “; “.
+#                     - Preserve any user handles that start with “@” without modification.
+#                     - Preserve any GitHub issue references starting with a "#" or “repository/#” without modification.
+#                     - Do not add, remove, or reorder information.
+#                     - Respond only with the corrected text and no additional explanations.
+#                 """,
+#             },
+#             {
+#                 "role": "user",
+#                 "content": description,
+#             },
+#         ],
+#     )
+
+#     return response["message"]["content"]
 
 
 def format_description_as_title_with_list_items(description, delimiter):
