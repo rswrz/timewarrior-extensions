@@ -24,13 +24,17 @@ DEFAULT_CONFIG_FILENAME = ".dynamics_config.json"
 DEFAULT_TYPE = "Work"
 
 LLM_ENABLED_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_ENABLED"
+LLM_PROVIDER_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_PROVIDER"
 LLM_ENDPOINT_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_ENDPOINT"
 LLM_MODEL_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_MODEL"
 LLM_TEMPERATURE_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_TEMPERATURE"
 LLM_TIMEOUT_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_TIMEOUT"
+OPENAI_API_KEY_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_OPENAI_API_KEY"
 
 DEFAULT_LLM_ENDPOINT = "http://127.0.0.1:11434/api/generate"
+DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_LLM_MODEL = "llama3"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_LLM_TEMPERATURE = 0.2
 DEFAULT_LLM_TIMEOUT = 2.0
 
@@ -65,7 +69,7 @@ class DynamicsEntry:
 
 
 class LLMRefiner:
-    """Refine descriptions using a local LLM when enabled."""
+    """Refine descriptions using an optional LLM backend (local or remote)."""
 
     SYSTEM_PROMPT = (
         "You rewrite time tracking descriptions for clarity while keeping the original meaning. "
@@ -79,12 +83,16 @@ class LLMRefiner:
         model: str = DEFAULT_LLM_MODEL,
         temperature: float = DEFAULT_LLM_TEMPERATURE,
         timeout: float = DEFAULT_LLM_TIMEOUT,
+        provider: str = "ollama",
+        api_key: Optional[str] = None,
     ) -> None:
         self.enabled = enabled
         self.endpoint = endpoint
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
+        self.provider = provider
+        self.api_key = api_key
         self._cache: Dict[Tuple[Any, ...], str] = {}
 
     @staticmethod
@@ -104,10 +112,19 @@ class LLMRefiner:
         if not enabled:
             return cls(False)
 
-        endpoint = os.getenv(LLM_ENDPOINT_ENV_VAR, DEFAULT_LLM_ENDPOINT)
-        model = os.getenv(LLM_MODEL_ENV_VAR, DEFAULT_LLM_MODEL)
+        provider = os.getenv(LLM_PROVIDER_ENV_VAR, "ollama").strip().lower()
+        if provider == "openai":
+            endpoint = os.getenv(LLM_ENDPOINT_ENV_VAR, DEFAULT_OPENAI_ENDPOINT)
+            default_model = DEFAULT_OPENAI_MODEL
+        else:
+            provider = "ollama"
+            endpoint = os.getenv(LLM_ENDPOINT_ENV_VAR, DEFAULT_LLM_ENDPOINT)
+            default_model = DEFAULT_LLM_MODEL
+
+        model = os.getenv(LLM_MODEL_ENV_VAR, default_model)
         temperature_value = os.getenv(LLM_TEMPERATURE_ENV_VAR)
         timeout_value = os.getenv(LLM_TIMEOUT_ENV_VAR)
+        api_key = os.getenv(OPENAI_API_KEY_ENV_VAR)
 
         try:
             temperature = float(temperature_value) if temperature_value is not None else DEFAULT_LLM_TEMPERATURE
@@ -119,7 +136,15 @@ class LLMRefiner:
         except ValueError:
             timeout = DEFAULT_LLM_TIMEOUT
 
-        return cls(True, endpoint=endpoint, model=model, temperature=temperature, timeout=timeout)
+        return cls(
+            True,
+            endpoint=endpoint,
+            model=model,
+            temperature=temperature,
+            timeout=timeout,
+            provider=provider,
+            api_key=api_key,
+        )
 
     def refine(
         self,
@@ -141,6 +166,10 @@ class LLMRefiner:
         effective_temperature = overrides.get("temperature", self.temperature)
         effective_endpoint = overrides.get("endpoint", self.endpoint)
         effective_timeout = overrides.get("timeout", self.timeout)
+        effective_provider = str(overrides.get("provider", self.provider)).strip().lower()
+        if effective_provider not in {"ollama", "openai"}:
+            effective_provider = self.provider
+        effective_api_key = overrides.get("api_key", self.api_key)
 
         try:
             effective_temperature = float(effective_temperature)
@@ -153,6 +182,8 @@ class LLMRefiner:
             effective_timeout = self.timeout
 
         if not effective_model or not effective_endpoint:
+            return description
+        if effective_provider == "openai" and not effective_api_key:
             return description
 
         delimiter = delimiter or ""
@@ -177,6 +208,8 @@ class LLMRefiner:
             output_separator,
             effective_model,
             round(float(effective_temperature), 3),
+            effective_provider,
+            effective_endpoint,
             tuple(sorted((k, v) for k, v in context.items() if v)),
             tuple(visible_segments),
         )
@@ -185,16 +218,32 @@ class LLMRefiner:
             return self._cache[cache_key]
 
         prompt = self._build_prompt(description, visible_segments, delimiter, output_separator, context)
-        payload = {
-            "model": effective_model,
-            "prompt": prompt,
-            "system": self.SYSTEM_PROMPT,
-            "stream": False,
-            "options": {"temperature": float(effective_temperature)},
-        }
+        if effective_provider == "openai":
+            payload: Dict[str, Any] = {
+                "model": effective_model,
+                "messages": [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": float(effective_temperature),
+            }
+        else:
+            payload = {
+                "model": effective_model,
+                "prompt": prompt,
+                "system": self.SYSTEM_PROMPT,
+                "stream": False,
+                "options": {"temperature": float(effective_temperature)},
+            }
 
         try:
-            refined_segments = self._call_model(payload, effective_endpoint, effective_timeout)
+            refined_segments = self._call_model(
+                payload,
+                effective_endpoint,
+                effective_timeout,
+                effective_provider,
+                effective_api_key,
+            )
         except Exception:
             return description
 
@@ -258,9 +307,15 @@ class LLMRefiner:
         payload: Dict[str, Any],
         endpoint: str,
         timeout: float,
+        provider: str,
+        api_key: Optional[str],
     ) -> Optional[List[str]]:
         data = json.dumps(payload).encode("utf-8")
-        request_obj = urlrequest.Request(endpoint, data=data, headers={"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if provider == "openai" and api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        request_obj = urlrequest.Request(endpoint, data=data, headers=headers)
 
         try:
             with urlrequest.urlopen(request_obj, timeout=float(timeout)) as response:
@@ -273,7 +328,19 @@ class LLMRefiner:
         except json.JSONDecodeError as exc:
             raise RuntimeError("Invalid JSON from LLM endpoint") from exc
 
-        output = response_json.get("response")
+        if provider == "openai":
+            choices = response_json.get("choices")
+            if not isinstance(choices, list) or not choices:
+                return None
+            first_choice = choices[0]
+            if not isinstance(first_choice, dict):
+                return None
+            message = first_choice.get("message")
+            if not isinstance(message, dict):
+                return None
+            output = message.get("content", "")
+        else:
+            output = response_json.get("response")
         if not isinstance(output, str):
             return None
 
@@ -460,6 +527,10 @@ def build_dynamics_entry(
             pass
     if "llm_endpoint" in project_config:
         llm_settings["endpoint"] = project_config["llm_endpoint"]
+    if "llm_provider" in project_config:
+        llm_settings["provider"] = str(project_config["llm_provider"]).strip().lower()
+    if "llm_api_key" in project_config:
+        llm_settings["api_key"] = project_config["llm_api_key"]
 
     entry = DynamicsEntry(
         date=start_dt.astimezone().strftime("%Y-%m-%d"),

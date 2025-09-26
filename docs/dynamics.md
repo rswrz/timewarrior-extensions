@@ -71,7 +71,7 @@ Each mapping object may include:
 - `annotation_delimiter` (string, default `; `)
 - `annotation_output_separator` (string, default `;\n`)
 - Optional LLM overrides (see below):
-  - `llm_enabled` (boolean), `llm_model` (string), `llm_temperature` (number), `llm_timeout` (seconds), `llm_endpoint` (URL)
+  - `llm_enabled` (boolean), `llm_model` (string), `llm_temperature` (number), `llm_timeout` (seconds), `llm_endpoint` (URL), `llm_provider` (string), `llm_api_key` (string)
 
 Example:
 
@@ -114,10 +114,12 @@ Example:
   - `TIMEWARRIOR_EXT_DYNAMICS_OUTPUT_SEPARATOR`: override output joiner
 - Optional LLM refinement
   - `TIMEWARRIOR_EXT_DYNAMICS_LLM_ENABLED` (true/false; default off)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_ENDPOINT` (default `http://127.0.0.1:11434/api/generate`)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_MODEL` (default `llama3`)
+  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_PROVIDER` (`ollama` default, or `openai`)
+  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_ENDPOINT` (default `http://127.0.0.1:11434/api/generate` for Ollama, `https://api.openai.com/v1/chat/completions` for OpenAI)
+  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_MODEL` (default `llama3` for Ollama; set e.g. `gpt-4o-mini` for OpenAI)
   - `TIMEWARRIOR_EXT_DYNAMICS_LLM_TEMPERATURE` (default `0.2`)
   - `TIMEWARRIOR_EXT_DYNAMICS_LLM_TIMEOUT` seconds (default `2.0`)
+  - `TIMEWARRIOR_EXT_DYNAMICS_OPENAI_API_KEY` (required when provider is `openai`)
 
 ## LLM Refinement (Optional)
 
@@ -127,7 +129,10 @@ Example:
   - The delimiter-separated structure is preserved (same number/order of segments).
   - Hidden `++…++` segments are not sent to the LLM and are preserved as-is.
   - On timeout/parse error, the original description is used.
-- Per-project overrides: `llm_enabled`, `llm_model`, `llm_temperature`, `llm_timeout`, `llm_endpoint`.
+- Per-project overrides: `llm_enabled`, `llm_model`, `llm_temperature`, `llm_timeout`, `llm_endpoint`, `llm_provider`, `llm_api_key`.
+- Provider notes:
+  - `ollama` (default): communicates with a local Ollama server.
+  - `openai`: uses OpenAI Chat Completions; requires the API key either via env var or `llm_api_key`.
 
 ## Troubleshooting
 
@@ -142,4 +147,3 @@ Example:
 - Use `description_prefix` to create a stable title that encourages merging of related items.
 - Keep list items short and focused; the output separator makes them readable in CSV.
 - Prefer IDs for `project`/`project_task` if your downstream system expects them.
-
