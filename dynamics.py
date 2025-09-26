@@ -171,13 +171,15 @@ def build_dynamics_entry(timew_entry: dict, project_config: dict) -> Tuple[Dynam
         bool(project_config["merge_on_equal_tags"]) if "merge_on_equal_tags" in project_config else False
     )
 
+    entry_type = project_config.get("type", DEFAULT_TYPE)
+
     entry = DynamicsEntry(
         date=start_dt.astimezone().strftime("%Y-%m-%d"),
         duration=duration_minutes,
         project=project_value,
         project_task=project_task_value,
         role=role_value,
-        type=DEFAULT_TYPE,
+        type=entry_type,
         description=description,
         external_comments=external_comment,
     )
