@@ -12,7 +12,9 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
 DEFAULT_ANNOTATION_DELIMITER = "; "
+DEFAULT_OUTPUT_SEPARATOR = ";\n"
 ANNOTATION_DELIMITER_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_ANNOTATION_DELIMITER"
+OUTPUT_SEPARATOR_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_OUTPUT_SEPARATOR"
 CSV_DELIMITER = ","
 MAX_DESCRIPTION_LENGTH = 500
 CONFIG_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON"
@@ -33,6 +35,7 @@ class DynamicsEntry:
     description: str
     external_comments: str
     annotation_delimiter: str
+    output_separator: str
 
     def as_row(self) -> List[str]:
         return [
@@ -66,12 +69,19 @@ def csv_escape_special_chars(text: str) -> str:
     return text.replace('"', '""').replace("\\", "\\\\")
 
 
-def sanitize_description(text: str, delimiter: str) -> str:
-    """Remove hidden markers and add line breaks between list items."""
+def sanitize_description(
+    text: str,
+    input_delimiter: Optional[str],
+    output_separator: str,
+) -> str:
+    """Remove hidden markers and join list items with the configured separator."""
 
-    parts = text.split(delimiter)
+    if not input_delimiter:
+        return text
+
+    parts = text.split(input_delimiter)
     visible_parts = [element for element in parts if not (element.startswith("++") and element.endswith("++"))]
-    return ";\n".join(visible_parts)
+    return output_separator.join(visible_parts)
 
 
 def join_unique(items: Sequence[str], delimiter: str) -> str:
@@ -144,6 +154,7 @@ def build_dynamics_entry(
     timew_entry: dict,
     project_config: dict,
     annotation_delimiter_override: Optional[str] = None,
+    output_separator_override: Optional[str] = None,
 ) -> Tuple[DynamicsEntry, bool]:
     """Construct a DynamicsEntry from a timew record and config mapping."""
 
@@ -174,6 +185,13 @@ def build_dynamics_entry(
     if not annotation_delimiter:
         annotation_delimiter = DEFAULT_ANNOTATION_DELIMITER
 
+    if output_separator_override is not None:
+        output_separator = output_separator_override
+    else:
+        output_separator = project_config.get("annotation_output_separator", DEFAULT_OUTPUT_SEPARATOR)
+    if output_separator is None or output_separator == "":
+        output_separator = DEFAULT_OUTPUT_SEPARATOR
+
     if "description_prefix" in project_config:
         description = project_config["description_prefix"] + annotation_delimiter + annotation
     else:
@@ -196,6 +214,7 @@ def build_dynamics_entry(
         description=description,
         external_comments=external_comment,
         annotation_delimiter=annotation_delimiter,
+        output_separator=output_separator,
     )
 
     return entry, merge_on_equal_tags
@@ -211,6 +230,7 @@ def should_merge_base(existing: DynamicsEntry, new_entry: DynamicsEntry) -> bool
         and existing.role == new_entry.role
         and existing.type == new_entry.type
         and existing.annotation_delimiter == new_entry.annotation_delimiter
+        and existing.output_separator == new_entry.output_separator
     )
 
 
@@ -251,12 +271,17 @@ def merge_entries(
     entries.append(new_entry)
 
 
-def format_csv_row(values: Sequence[str], annotation_delimiter: Optional[str]) -> str:
+def format_csv_row(
+    values: Sequence[str],
+    annotation_delimiter: Optional[str],
+    output_separator: Optional[str],
+) -> str:
     """Render the CSV row with manual quoting identical to original script."""
 
     row = list(values)
     if annotation_delimiter:
-        row[6] = sanitize_description(row[6], annotation_delimiter)
+        separator = output_separator or DEFAULT_OUTPUT_SEPARATOR
+        row[6] = sanitize_description(row[6], annotation_delimiter, separator)
 
     escaped = [f'"{csv_escape_special_chars(value)}"' for value in row]
     return CSV_DELIMITER.join(escaped)
@@ -275,10 +300,10 @@ def write_output(entries: Sequence[DynamicsEntry]) -> None:
         "Description",
         "External Comments",
     )
-    sys.stdout.write(format_csv_row(header, None) + "\n")
+    sys.stdout.write(format_csv_row(header, None, None) + "\n")
 
     for index, entry in enumerate(entries):
-        line = format_csv_row(entry.as_row(), entry.annotation_delimiter)
+        line = format_csv_row(entry.as_row(), entry.annotation_delimiter, entry.output_separator)
         if index + 1 == len(entries):
             sys.stdout.write(line)
         else:
@@ -289,6 +314,7 @@ def main() -> None:
     project_configs = load_project_configuration()
     timew_entries = parse_timew_export(sys.stdin)
     annotation_delimiter_override = os.getenv(ANNOTATION_DELIMITER_ENV_VAR)
+    output_separator_override = os.getenv(OUTPUT_SEPARATOR_ENV_VAR)
 
     dynamics_entries: List[DynamicsEntry] = []
     for timew_entry in timew_entries:
@@ -301,6 +327,7 @@ def main() -> None:
             timew_entry,
             project_config,
             annotation_delimiter_override,
+            output_separator_override,
         )
         merge_entries(
             dynamics_entries,
