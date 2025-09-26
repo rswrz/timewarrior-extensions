@@ -2,13 +2,15 @@
 
 """Timewarrior extension to export Dynamics-compatible CSV data."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import math
 import os
 import sys
-from typing import Iterable, List, Optional, Sequence, Tuple
+import socket
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from urllib import error as urlerror, request as urlrequest
 
 TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
 DEFAULT_ANNOTATION_DELIMITER = "; "
@@ -20,6 +22,17 @@ MAX_DESCRIPTION_LENGTH = 500
 CONFIG_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON"
 DEFAULT_CONFIG_FILENAME = ".dynamics_config.json"
 DEFAULT_TYPE = "Work"
+
+LLM_ENABLED_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_ENABLED"
+LLM_ENDPOINT_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_ENDPOINT"
+LLM_MODEL_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_MODEL"
+LLM_TEMPERATURE_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_TEMPERATURE"
+LLM_TIMEOUT_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_LLM_TIMEOUT"
+
+DEFAULT_LLM_ENDPOINT = "http://127.0.0.1:11434/api/generate"
+DEFAULT_LLM_MODEL = "llama3"
+DEFAULT_LLM_TEMPERATURE = 0.2
+DEFAULT_LLM_TIMEOUT = 2.0
 
 
 @dataclass
@@ -36,6 +49,7 @@ class DynamicsEntry:
     external_comments: str
     annotation_delimiter: str
     output_separator: str
+    llm_settings: Dict[str, Any] = field(default_factory=dict)
 
     def as_row(self) -> List[str]:
         return [
@@ -48,6 +62,231 @@ class DynamicsEntry:
             self.description,
             self.external_comments,
         ]
+
+
+class LLMRefiner:
+    """Refine descriptions using a local LLM when enabled."""
+
+    SYSTEM_PROMPT = (
+        "You rewrite time tracking descriptions for clarity while keeping the original meaning. "
+        "You must respond with JSON only."
+    )
+
+    def __init__(
+        self,
+        enabled: bool,
+        endpoint: str = DEFAULT_LLM_ENDPOINT,
+        model: str = DEFAULT_LLM_MODEL,
+        temperature: float = DEFAULT_LLM_TEMPERATURE,
+        timeout: float = DEFAULT_LLM_TIMEOUT,
+    ) -> None:
+        self.enabled = enabled
+        self.endpoint = endpoint
+        self.model = model
+        self.temperature = temperature
+        self.timeout = timeout
+        self._cache: Dict[Tuple[Any, ...], str] = {}
+
+    @staticmethod
+    def _parse_bool(value: Optional[str]) -> Optional[bool]:
+        if value is None:
+            return None
+        lower = value.strip().lower()
+        if lower in {"1", "true", "yes", "on"}:
+            return True
+        if lower in {"0", "false", "no", "off"}:
+            return False
+        return None
+
+    @classmethod
+    def from_env(cls) -> "LLMRefiner":
+        enabled = cls._parse_bool(os.getenv(LLM_ENABLED_ENV_VAR))
+        if not enabled:
+            return cls(False)
+
+        endpoint = os.getenv(LLM_ENDPOINT_ENV_VAR, DEFAULT_LLM_ENDPOINT)
+        model = os.getenv(LLM_MODEL_ENV_VAR, DEFAULT_LLM_MODEL)
+        temperature_value = os.getenv(LLM_TEMPERATURE_ENV_VAR)
+        timeout_value = os.getenv(LLM_TIMEOUT_ENV_VAR)
+
+        try:
+            temperature = float(temperature_value) if temperature_value is not None else DEFAULT_LLM_TEMPERATURE
+        except ValueError:
+            temperature = DEFAULT_LLM_TEMPERATURE
+
+        try:
+            timeout = float(timeout_value) if timeout_value is not None else DEFAULT_LLM_TIMEOUT
+        except ValueError:
+            timeout = DEFAULT_LLM_TIMEOUT
+
+        return cls(True, endpoint=endpoint, model=model, temperature=temperature, timeout=timeout)
+
+    def refine(
+        self,
+        description: str,
+        delimiter: Optional[str],
+        output_separator: str,
+        context: Dict[str, str],
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        if not self.enabled:
+            return description
+
+        overrides = overrides or {}
+        override_enabled = overrides.get("enabled")
+        if override_enabled is False:
+            return description
+
+        effective_model = overrides.get("model", self.model)
+        effective_temperature = overrides.get("temperature", self.temperature)
+        effective_endpoint = overrides.get("endpoint", self.endpoint)
+        effective_timeout = overrides.get("timeout", self.timeout)
+
+        try:
+            effective_temperature = float(effective_temperature)
+        except (TypeError, ValueError):
+            effective_temperature = self.temperature
+
+        try:
+            effective_timeout = float(effective_timeout)
+        except (TypeError, ValueError):
+            effective_timeout = self.timeout
+
+        if not effective_model or not effective_endpoint:
+            return description
+
+        delimiter = delimiter or ""
+        segments = [description] if not delimiter else description.split(delimiter)
+        if not segments:
+            return description
+
+        hidden_mask = []
+        visible_segments: List[str] = []
+        for segment in segments:
+            is_hidden = segment.startswith("++") and segment.endswith("++")
+            hidden_mask.append(is_hidden)
+            if not is_hidden:
+                visible_segments.append(segment.strip())
+
+        if not visible_segments:
+            return description
+
+        cache_key = (
+            description,
+            delimiter,
+            output_separator,
+            effective_model,
+            round(float(effective_temperature), 3),
+            tuple(sorted((k, v) for k, v in context.items() if v)),
+            tuple(visible_segments),
+        )
+
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        prompt = self._build_prompt(description, visible_segments, delimiter, output_separator, context)
+        payload = {
+            "model": effective_model,
+            "prompt": prompt,
+            "system": self.SYSTEM_PROMPT,
+            "stream": False,
+            "options": {"temperature": float(effective_temperature)},
+        }
+
+        try:
+            refined_segments = self._call_model(payload, effective_endpoint, effective_timeout)
+        except Exception:
+            return description
+
+        if refined_segments is None or len(refined_segments) != len(visible_segments):
+            return description
+
+        visible_iter = iter(refined_segments)
+        reconstructed: List[str] = []
+        for is_hidden, original in zip(hidden_mask, segments):
+            if is_hidden:
+                reconstructed.append(original)
+                continue
+
+            candidate = next(visible_iter)
+            if not isinstance(candidate, str):
+                return description
+            cleaned = candidate.strip()
+            if not cleaned:
+                cleaned = original.strip()
+            reconstructed.append(cleaned)
+
+        if delimiter:
+            refined_description = delimiter.join(reconstructed)
+        else:
+            refined_description = reconstructed[0] if reconstructed else description
+
+        self._cache[cache_key] = refined_description
+        return refined_description
+
+    @staticmethod
+    def _build_prompt(
+        description: str,
+        segments: Sequence[str],
+        delimiter: str,
+        output_separator: str,
+        context: Dict[str, str],
+    ) -> str:
+        context_lines = [f"{key.title()}: {value}" for key, value in context.items() if value]
+        context_block = "\n".join(context_lines) if context_lines else "None"
+        segments_json = json.dumps(list(segments), ensure_ascii=False)
+
+        instructions = (
+            "Rewrite each segment for clarity while keeping the original meaning. "
+            "Return a JSON array with exactly {count} strings in the same order. "
+            "Do not add, remove, or reorder segments. Keep numbers, IDs, and names unchanged. "
+            "Each string must stay concise and professional. Respond with JSON only."
+        ).format(count=len(segments))
+
+        prompt = (
+            f"{instructions}\n\n"
+            f"Delimiter: {delimiter or '[none]'}\n"
+            f"Output separator: {output_separator}\n"
+            f"Context:\n{context_block}\n\n"
+            f"Original description string:\n{description}\n\n"
+            f"Segments JSON:\n{segments_json}\n"
+        )
+        return prompt
+
+    def _call_model(
+        self,
+        payload: Dict[str, Any],
+        endpoint: str,
+        timeout: float,
+    ) -> Optional[List[str]]:
+        data = json.dumps(payload).encode("utf-8")
+        request_obj = urlrequest.Request(endpoint, data=data, headers={"Content-Type": "application/json"})
+
+        try:
+            with urlrequest.urlopen(request_obj, timeout=float(timeout)) as response:
+                raw = response.read().decode("utf-8")
+        except (urlerror.URLError, socket.timeout):
+            raise
+
+        try:
+            response_json = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Invalid JSON from LLM endpoint") from exc
+
+        output = response_json.get("response")
+        if not isinstance(output, str):
+            return None
+
+        output = output.strip()
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(parsed, list):
+            return None
+
+        return [str(item) for item in parsed]
 
 
 def calculate_working_time(datetime_start: datetime, datetime_end: datetime, multiplier: float = 1) -> int:
@@ -204,6 +443,24 @@ def build_dynamics_entry(
 
     entry_type = project_config.get("type", DEFAULT_TYPE)
 
+    llm_settings: Dict[str, Any] = {}
+    if "llm_enabled" in project_config:
+        llm_settings["enabled"] = bool(project_config["llm_enabled"])
+    if "llm_model" in project_config:
+        llm_settings["model"] = project_config["llm_model"]
+    if "llm_temperature" in project_config:
+        try:
+            llm_settings["temperature"] = float(project_config["llm_temperature"])
+        except (TypeError, ValueError):
+            pass
+    if "llm_timeout" in project_config:
+        try:
+            llm_settings["timeout"] = float(project_config["llm_timeout"])
+        except (TypeError, ValueError):
+            pass
+    if "llm_endpoint" in project_config:
+        llm_settings["endpoint"] = project_config["llm_endpoint"]
+
     entry = DynamicsEntry(
         date=start_dt.astimezone().strftime("%Y-%m-%d"),
         duration=duration_minutes,
@@ -215,6 +472,7 @@ def build_dynamics_entry(
         external_comments=external_comment,
         annotation_delimiter=annotation_delimiter,
         output_separator=output_separator,
+        llm_settings=llm_settings,
     )
 
     return entry, merge_on_equal_tags
@@ -334,6 +592,23 @@ def main() -> None:
             entry,
             merge_on_equal_tags,
         )
+
+    refiner = LLMRefiner.from_env()
+    if refiner.enabled:
+        for idx, dynamics_entry in enumerate(dynamics_entries):
+            dynamics_entries[idx].description = refiner.refine(
+                description=dynamics_entry.description,
+                delimiter=dynamics_entry.annotation_delimiter,
+                output_separator=dynamics_entry.output_separator,
+                context={
+                    "date": dynamics_entry.date,
+                    "project": dynamics_entry.project,
+                    "project_task": dynamics_entry.project_task,
+                    "role": dynamics_entry.role,
+                    "type": dynamics_entry.type,
+                },
+                overrides=dynamics_entry.llm_settings,
+            )
 
     write_output(dynamics_entries)
 
