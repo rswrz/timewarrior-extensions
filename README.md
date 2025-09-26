@@ -2,6 +2,11 @@
 
 A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](https://timewarrior.net/docs/extensions/) to enhance my time tracking workflow.
 
+## Extensions
+
+- `dynamics.py` — Export + merge entries to CSV (Dynamics‑ready), with tag→project mapping, rounding, and optional LLM description refinement. See docs/dynamics.md
+- `table.py`, `totals.py`, `csv.py`, `debug.py`, `zoho.py` — See source files for details.
+
 ## Useful Aliases & Functions
 
 For a set of helpful aliases and shell functions, visit the <https://github.com/rswrz/timewarrior>.
