@@ -1,1 +1,15 @@
-[]
+[
+  {
+    "project_name": "Example Project",
+    "task_name": "Example Task 1",
+    "tag": ["example", "project", "one"],
+    "billable": true
+  },
+  {
+    "project_name": "Example Project 2",
+    "task_name": "Example Task 2",
+    "tag": ["example", "project", "two"],
+    "billable": true,
+    "multiplier": 1.2
+  }
+]

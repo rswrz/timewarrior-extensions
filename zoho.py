@@ -1,202 +1,237 @@
 #!/usr/bin/env python3
 
+"""Timewarrior extension to export Zoho-compatible CSV data."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
 import math
-import sys
 import os
+import sys
+from typing import Dict, Iterable, List, Optional, Sequence
+
+TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
+DEFAULT_CONFIG_FILENAME = ".zoho_config.json"
+CONFIG_ENV_VAR = "TIMEWARRIOR_EXT_ZOHO_CONFIG_JSON"
+CSV_DELIMITER = ","
+NOTES_DELIMITER = ";\n"
 
 
-def calculate_working_time(
-    datetime_start: datetime, datetime_end: datetime, multiplier=1
-):
-    datetime_delta = datetime_end - datetime_start
-    total_seconds = datetime_delta.total_seconds()
-    total_seconds_multiplied = total_seconds * multiplier
+@dataclass
+class ZohoEntry:
+    """In-memory representation of a Zoho CSV row."""
 
-    total_minutes_rounded_15m = (
-        math.ceil(round(total_seconds_multiplied / 60) / 15) * 15
-    )
-    result = timedelta(minutes=total_minutes_rounded_15m)
+    date: str
+    duration: timedelta
+    project_name: str
+    task_name: str
+    billable_status: str
+    notes: str
 
-    return result
-
-
-def csv_escape_special_chars(text):
-    escaped_text = text.replace('"', '""').replace("\\", "\\\\")
-    return escaped_text
-
-
-def get_project_and_task(tags):
-    # Open project config file
-    zoho_config_json = os.getenv(
-        "TIMEWARRIOR_EXT_ZOHO_CONFIG_JSON", ".zoho_config.json"
-    )
-    f = open(os.path.join(sys.path[0], zoho_config_json))
-    project_identifier = json.load(f)
-
-    # Get the project with the most matching tags
-    project = None
-    for pi in project_identifier:
-        stags = set(tags)
-        spitags = set(pi["tag"])
-        if spitags == stags:
-            return pi
-        if spitags < stags:
-            if project:
-                project_current = set(project["tag"])
-                if len(stags - spitags) < len(stags - project_current):
-                    project = pi
-                continue
-            else:
-                project = pi
-                continue
-
-    # Project not found, fallback
-    if not project:
-        project = {
-            "project_name": "NO PROJECT FOUND FOR THESE TAGS: {}".format(
-                ", ".join(tags)
-            ),
-            "task_name": "",
-        }
-
-    return project
+    def as_row(self) -> List[str]:
+        return [
+            self.date,
+            format_duration(self.duration),
+            self.project_name,
+            self.task_name,
+            self.billable_status,
+            self.notes,
+        ]
 
 
-def print_line(list):
-    delimiter = ","
-    list[5] = ";\n".join([element for element in list[5].split(";\n") if not (element.startswith('++') and element.endswith('++'))])
-    line = delimiter.join(f'"{csv_escape_special_chars(item)}"' for item in list)
-    print(line)
+def calculate_working_time(start: datetime, end: datetime, multiplier: float = 1.0) -> timedelta:
+    """Return a timedelta rounded up to 15-minute blocks after applying multiplier."""
+
+    total_seconds = (end - start).total_seconds()
+    total_seconds *= multiplier
+    total_minutes = math.ceil(round(total_seconds / 60) / 15) * 15
+    return timedelta(minutes=int(total_minutes))
 
 
-if __name__ == "__main__":
-    #
-    # stdin
-    #
+def csv_escape_special_chars(text: str) -> str:
+    """Escape characters that need quoting in CSV output."""
 
-    # Skip the configuration settings
-    for line in sys.stdin:
+    return text.replace('"', '""').replace("\\", "\\\\")
+
+
+def load_project_configuration() -> List[Dict[str, object]]:
+    """Read project definitions from the configured JSON file."""
+
+    config_filename = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_FILENAME)
+    config_path = os.path.join(sys.path[0], config_filename)
+    with open(config_path, encoding="utf-8") as config_file:
+        return json.load(config_file)
+
+
+def parse_timew_export(stream: Iterable[str]) -> List[Dict[str, object]]:
+    """Parse the JSON payload produced by `timew export`."""
+
+    for line in stream:
         if line == "\n":
             break
 
-    # Extract the JSON.
-    tmp = ""
-    for line in sys.stdin:
-        tmp += line
-    json_doc = json.loads(tmp)
-    del tmp
+    payload = "".join(stream)
+    return json.loads(payload) if payload else []
 
-    #
-    # process
-    #
 
-    data = []
-    for track in json_doc:
-        # Skip if time track entry has not ended yet
-        if "end" not in track:
-            continue
+def resolve_project_config(tags: Sequence[str], project_configs: Sequence[Dict[str, object]]) -> Dict[str, object]:
+    """Return the project configuration matching the provided tags."""
 
-        # Join tags to a comma separated string
-        tags = track["tags"] if "tags" in track else []
-        tags_list = ", ".join(f"{t}" for t in tags)
+    tag_set = set(tags)
+    matched_config: Optional[Dict[str, object]] = None
 
-        # Annotations as notes
-        notes = (
-            track["annotation"].replace("; ", ";\n") if "annotation" in track else ""
-        )
+    for project_config in project_configs:
+        config_tags = set(project_config.get("tag", []))
+        if config_tags == tag_set:
+            return project_config
+        if config_tags < tag_set:
+            if matched_config is None:
+                matched_config = project_config
+                continue
+            current_tags = set(matched_config.get("tag", []))
+            if len(tag_set - config_tags) < len(tag_set - current_tags):
+                matched_config = project_config
 
-        # Get Zoho project and task named based on tags
-        project = get_project_and_task(tags)
-        project_name = project["project_name"]
-        task_name = project["task_name"]
-        billable_status = (
-            "Billable" if project.get("billable") == True else "Non Billable"
-        )
-        multiplier = float(project["multiplier"]) if "multiplier" in project else 1
+    if matched_config:
+        return matched_config
 
-        if "note_prefix" in project:
-            notes = project["note_prefix"] + "\n" + notes
+    return {
+        "project_name": "NO PROJECT FOUND FOR THESE TAGS: {}".format(", ".join(tags)
+        ),
+        "task_name": "",
+    }
 
-        # start, end, worktime
-        timew_datetime_format = "%Y%m%dT%H%M%S%z"
-        start = datetime.strptime(track["start"], timew_datetime_format)
-        end = datetime.strptime(track["end"], timew_datetime_format)
-        time_spend = calculate_working_time(start, end, multiplier)
 
-        date_string = start.astimezone().strftime("%Y-%m-%d")
-        # start_string = start.astimezone().strftime('%H:%M:%S')
-        # end_string = start.astimezone().strftime('%H:%M:%S')
-        time_spend_string = str(time_spend)[:-3]
+def merge_entries(entries: List[ZohoEntry], new_entry: ZohoEntry) -> None:
+    """Insert or merge the new entry into the existing list."""
 
-        for i, d in enumerate(data):
-            # print("-->", d[0], d[2], d[3], d[5])
-            if (
-                d[0] == date_string
-                and d[2] == project_name
-                and d[3] == task_name
-                and d[5] == notes
-            ):
-                t = datetime.strptime(d[1], "%H:%M")
-                d = timedelta(hours=t.hour, minutes=t.minute)
-                d_new = d + time_spend
-                d_new_string = str(d_new)[:-3]
-                data[i] = [
-                    date_string,
-                    d_new_string,
-                    project_name,
-                    task_name,
-                    billable_status,
-                    notes,
-                ]
-                break
-            elif (
-                d[0] == date_string
-                and d[2] == project_name
-                and d[3] == task_name
-                and d[5].split(";\n")[0] == notes.split(";\n")[0]
-            ):
-                t = datetime.strptime(d[1], "%H:%M")
-                dd = timedelta(hours=t.hour, minutes=t.minute)
-                d_new = dd + time_spend
-                d_new_string = str(d_new)[:-3]
+    for index, existing in enumerate(entries):
+        if (
+            existing.date == new_entry.date
+            and existing.project_name == new_entry.project_name
+            and existing.task_name == new_entry.task_name
+        ):
+            if existing.notes == new_entry.notes:
+                entries[index].duration = existing.duration + new_entry.duration
+                return
 
-                note_items_without_title = ";\n".join(notes.split(";\n")[1:])
-                merged_notes = ";\n".join([d[5], note_items_without_title])
-                uniq_merged_notes = []
-                for n in merged_notes.split(";\n"):
-                    if n not in uniq_merged_notes:
-                        uniq_merged_notes.append(n)
-                uniq_merged_notes_string = ";\n".join(uniq_merged_notes)
+            existing_title = existing.notes.split(NOTES_DELIMITER)[0]
+            new_title = new_entry.notes.split(NOTES_DELIMITER)[0]
+            if existing_title == new_title:
+                entries[index].duration = existing.duration + new_entry.duration
+                merged_notes = merge_notes(existing.notes, new_entry.notes)
+                entries[index].notes = merged_notes
+                return
 
-                data[i] = [
-                    date_string,
-                    d_new_string,
-                    project_name,
-                    task_name,
-                    billable_status,
-                    uniq_merged_notes_string,
-                ]
-                break
-        else:
-            data.append(
-                [
-                    date_string,
-                    time_spend_string,
-                    project_name,
-                    task_name,
-                    billable_status,
-                    notes,
-                ]
-            )
+    entries.append(new_entry)
 
-    #
-    # stdout
-    #
 
-    print_line(
-        ["Date", "Time Spent", "Project Name", "Task Name", "Billable Status", "Notes"]
+def merge_notes(existing_notes: str, new_notes: str) -> str:
+    """Merge note items while preserving order and removing duplicates."""
+
+    remainder = NOTES_DELIMITER.join(new_notes.split(NOTES_DELIMITER)[1:])
+    merged = NOTES_DELIMITER.join([existing_notes, remainder])
+    unique_segments: List[str] = []
+    for segment in merged.split(NOTES_DELIMITER):
+        if segment not in unique_segments:
+            unique_segments.append(segment)
+    return NOTES_DELIMITER.join(unique_segments)
+
+
+def sanitize_notes(notes: str) -> str:
+    """Remove hidden note markers before writing to the CSV."""
+
+    visible = [
+        segment
+        for segment in notes.split(NOTES_DELIMITER)
+        if not (segment.startswith("++") and segment.endswith("++"))
+    ]
+    return NOTES_DELIMITER.join(visible)
+
+
+def format_duration(duration_value: timedelta) -> str:
+    """Return the Zoho time format (HH:MM) by trimming seconds from timedelta."""
+
+    duration_string = str(duration_value)
+    return duration_string[:-3] if duration_string.endswith(":00") else duration_string
+
+
+def format_csv_row(values: Sequence[str]) -> str:
+    """Render a CSV row with the expected quoting."""
+
+    escaped = [f'"{csv_escape_special_chars(value)}"' for value in values]
+    return CSV_DELIMITER.join(escaped)
+
+
+def write_output(entries: Sequence[ZohoEntry]) -> None:
+    """Send the CSV header and rows to stdout."""
+
+    header = (
+        "Date",
+        "Time Spent",
+        "Project Name",
+        "Task Name",
+        "Billable Status",
+        "Notes",
     )
-    for d in data:
-        print_line(d)
+    print(format_csv_row(header))
+
+    for entry in entries:
+        row = entry.as_row()
+        row[5] = sanitize_notes(row[5])
+        print(format_csv_row(row))
+
+
+def build_entry(track: Dict[str, object], project_config: Dict[str, object]) -> Optional[ZohoEntry]:
+    """Create a ZohoEntry for the provided time track if it has ended."""
+
+    if "end" not in track:
+        return None
+
+    tags = track.get("tags", [])
+    annotation = track.get("annotation", "")
+    notes = annotation.replace("; ", NOTES_DELIMITER)
+
+    if "note_prefix" in project_config:
+        prefix = project_config["note_prefix"]
+        notes = prefix + "\n" + notes if notes else prefix + "\n"
+
+    start = datetime.strptime(track["start"], TIMEW_DATETIME_FORMAT)
+    end = datetime.strptime(track["end"], TIMEW_DATETIME_FORMAT)
+
+    multiplier = float(project_config["multiplier"]) if "multiplier" in project_config else 1.0
+    time_spent = calculate_working_time(start, end, multiplier)
+
+    project_name = project_config.get("project_name", "")
+    task_name = project_config.get("task_name", "")
+    billable_status = "Billable" if project_config.get("billable") is True else "Non Billable"
+
+    return ZohoEntry(
+        date=start.astimezone().strftime("%Y-%m-%d"),
+        duration=time_spent,
+        project_name=project_name,
+        task_name=task_name,
+        billable_status=billable_status,
+        notes=notes,
+    )
+
+
+def main() -> None:
+    project_configs = load_project_configuration()
+    timew_entries = parse_timew_export(sys.stdin)
+
+    entries: List[ZohoEntry] = []
+    for track in timew_entries:
+        project_config = resolve_project_config(track.get("tags", []), project_configs)
+        entry = build_entry(track, project_config)
+        if entry is None:
+            continue
+        merge_entries(entries, entry)
+
+    write_output(entries)
+
+
+if __name__ == "__main__":
+    main()
