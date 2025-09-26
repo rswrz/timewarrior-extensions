@@ -1,28 +1,50 @@
 #!/usr/bin/env python3
 
+"""Simple Timewarrior CSV exporter."""
+
+from __future__ import annotations
+
 import json
 import sys
+from typing import Iterable, List, Dict
 
-# Skip the configuration settings.
-for line in sys.stdin:
-    if line == '\n':
-        break
+CSV_DELIMITER = ","
 
-# Extract the JSON.
-doc = ''
-for line in sys.stdin:
-    doc += line
 
-total_active_time = 0
+def skip_configuration(stream: Iterable[str]) -> None:
+    for line in stream:
+        if line == "\n":
+            break
 
-j = json.loads(doc)
 
-delimiter = ','
-head_line= delimiter.join(["Start","End","Annotation","Tags"])
-print(head_line)
+def read_export(stream: Iterable[str]) -> List[Dict[str, object]]:
+    payload = "".join(stream)
+    return json.loads(payload) if payload else []
 
-for object in j:
-    line = '"{}","{}"'.format(object['start'], (object['end'] if 'end' in object else ''))
-    line += ',"{}"'.format(object['annotation'] if 'annotation' in object else '')
-    line += ',"{}"'.format(' '.join(object['tags'] if 'tags' in object else []))
-    print(line)
+
+def csv_escape(value: str) -> str:
+    return value.replace('"', '""')
+
+
+def format_row(columns: List[str]) -> str:
+    escaped = [f'"{csv_escape(column)}"' for column in columns]
+    return CSV_DELIMITER.join(escaped)
+
+
+def main() -> None:
+    skip_configuration(sys.stdin)
+    entries = read_export(sys.stdin)
+
+    print(format_row(["Start", "End", "Annotation", "Tags"]))
+
+    for entry in entries:
+        start = entry.get("start", "")
+        end = entry.get("end", "")
+        annotation = entry.get("annotation", "")
+        tags = " ".join(entry.get("tags", []))
+
+        print(format_row([start, end, annotation, tags]))
+
+
+if __name__ == "__main__":
+    main()
