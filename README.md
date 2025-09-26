@@ -8,7 +8,7 @@ A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](ht
 - `zoho.py` — Export entries to a Zoho-compatible CSV with tag-based project/task mapping and note merging. See [`docs/zoho.md`](docs/zoho.md)
 - `csv.py` — Output raw `timew export` entries as a simple CSV. See [`docs/csv.md`](docs/csv.md)
 - `table.py` — Colorized summary view with annotations, gaps, and totals. See [`docs/table.md`](docs/table.md)
-- `totals.py`, `debug.py`, `zoho.py` — See source files for details.
+- `debug.py` — Print the incoming Timewarrior payload to stdout unchanged (handy for troubleshooting pipelines).
 
 ## Useful Aliases & Functions
 
