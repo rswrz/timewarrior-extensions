@@ -1,344 +1,290 @@
 #!/usr/bin/env python3
 
-from datetime import datetime, timedelta
+"""Timewarrior extension to export Dynamics-compatible CSV data."""
+
+from dataclasses import dataclass
+from datetime import datetime
 import json
 import math
-import sys
 import os
+import sys
+from typing import Iterable, List, Optional, Sequence, Tuple
+
+TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
+ANNOTATION_DELIMITER = "; "
+CSV_DELIMITER = ","
+MAX_DESCRIPTION_LENGTH = 500
+CONFIG_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON"
+DEFAULT_CONFIG_FILENAME = ".dynamics_config.json"
+DEFAULT_TYPE = "Work"
 
 
-def calculate_working_time(datetime_start: datetime, datetime_end: datetime, multiplier=1):
+@dataclass
+class DynamicsEntry:
+    """Container for the final CSV payload."""
+
+    date: str
+    duration: int
+    project: str
+    project_task: str
+    role: str
+    type: str
+    description: str
+    external_comments: str
+
+    def as_row(self) -> List[str]:
+        return [
+            self.date,
+            str(self.duration),
+            self.project,
+            self.project_task,
+            self.role,
+            self.type,
+            self.description,
+            self.external_comments,
+        ]
+
+
+def calculate_working_time(datetime_start: datetime, datetime_end: datetime, multiplier: float = 1) -> int:
+    """Return minutes rounded up to 15-minute blocks after applying multiplier."""
+
     datetime_delta = datetime_end - datetime_start
     total_seconds = datetime_delta.total_seconds()
     total_seconds_multiplied = total_seconds * multiplier
 
-    total_minutes_rounded_15m = math.ceil(round(total_seconds_multiplied / 60) / 15) * 15
+    total_minutes = round(total_seconds_multiplied / 60)
+    total_minutes_rounded_15m = math.ceil(total_minutes / 15) * 15
 
     return total_minutes_rounded_15m
 
 
-def csv_escape_special_chars(text):
-    escaped_text = text.replace('"', '""').replace("\\", "\\\\")
-    return escaped_text
+def csv_escape_special_chars(text: str) -> str:
+    """Escape CSV-sensitive characters to keep manual formatting consistent."""
+
+    return text.replace('"', '""').replace("\\", "\\\\")
 
 
-def get_project_and_task(tags):
-    # Open project config file
-    dynamics_config_json = os.getenv("TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON", ".dynamics_config.json")
-    f = open(os.path.join(sys.path[0], dynamics_config_json))
-    project_identifier = json.load(f)
+def sanitize_description(text: str, delimiter: str) -> str:
+    """Remove hidden markers and add line breaks between list items."""
 
-    # Get the project with the most matching tags
-    project = None
-    for pi in project_identifier:
-        stags = set(tags)
-        spitags = set(pi["timew_tags"])
-        if spitags == stags:
-            return pi
-        if spitags < stags:
-            if project:
-                project_current = set(project["timew_tags"])
-                if len(stags - spitags) < len(stags - project_current):
-                    project = pi
-                continue
-            else:
-                project = pi
-                continue
-
-    # Project not found, fallback
-    if not project:
-        if len(tags) == 0:
-            _no_project_note = "NO TAGS DEFINED TO THIS TIME ENTRY"
-        else:
-            _no_project_note = "NO PROJECT FOUND FOR THESE TAGS: {}".format(", ".join(tags))
-        project = {"project": _no_project_note, "project_task": "-", "role": "-"}
-
-    return project
+    parts = text.split(delimiter)
+    visible_parts = [element for element in parts if not (element.startswith("++") and element.endswith("++"))]
+    return ";\n".join(visible_parts)
 
 
-def print_line(list, annotation_delimiter=None, end=None):
-    csv_column_delimiter = ","
-    list[6] = ";\n".join(
-        [
-            element
-            for element in list[6].split(annotation_delimiter)
-            if not (element.startswith("++") and element.endswith("++"))
-        ]
-    )
-    line = csv_column_delimiter.join(f'"{csv_escape_special_chars(item)}"' for item in list)
-    print(line, end=end)
+def join_unique(items: Sequence[str], delimiter: str) -> str:
+    """Deduplicate list items while keeping their first-seen order."""
+
+    unique: List[str] = []
+    for item in items:
+        if item not in unique:
+            unique.append(item)
+    return delimiter.join(unique)
 
 
-def format_description_as_title_with_list_items(description, delimiter):
-    _description_list = description.split(delimiter)
-    title = _description_list.pop(0)
+def merge_annotations(existing: str, addition: str, delimiter: str) -> str:
+    """Merge two delimiter-separated strings while preserving uniqueness."""
 
-    if len(_description_list) == 0:
-        return title
-    elif len(_description_list) >= 1:
-        list_items = "\n - ".join(_description_list)
-        return "{}\n - {}".format(title, list_items)
+    merged = delimiter.join([existing, addition])
+    return join_unique(merged.split(delimiter), delimiter)
 
 
-if __name__ == "__main__":
-    #
-    # stdin
-    #
+def load_project_configuration() -> List[dict]:
+    """Load project definitions from the configured JSON file."""
 
-    # Skip the configuration settings
-    for line in sys.stdin:
+    config_filename = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_FILENAME)
+    config_path = os.path.join(sys.path[0], config_filename)
+    with open(config_path, encoding="utf-8") as config_file:
+        return json.load(config_file)
+
+
+def parse_timew_export(stream: Iterable[str]) -> List[dict]:
+    """Parse the JSON payload produced by `timew export`."""
+
+    for line in stream:
         if line == "\n":
             break
 
-    # Extract the JSON.
-    tmp = ""
-    for line in sys.stdin:
-        tmp += line
-    timew_export = json.loads(tmp)
-    del tmp
+    payload = "".join(stream)
+    return json.loads(payload) if payload else []
 
-    #
-    # process
-    #
 
-    dynamics_max_description_length = 500
-    dynamics_time_entries = []
-    timew_annotation_delimiter = "; "
-    for _timew_entry in timew_export:
-        # Skip if time _timew_entry entry has not ended yet
-        if "end" not in _timew_entry:
+def resolve_project_config(tags: Sequence[str], project_configs: Sequence[dict]) -> dict:
+    """Return the project configuration matching the provided tags."""
+
+    tag_set = set(tags)
+    chosen_config: Optional[dict] = None
+
+    for project_config in project_configs:
+        config_tags = set(project_config.get("timew_tags", []))
+        if config_tags == tag_set:
+            return project_config
+        if config_tags < tag_set:
+            if chosen_config is None:
+                chosen_config = project_config
+                continue
+            current_tags = set(chosen_config.get("timew_tags", []))
+            if len(tag_set - config_tags) < len(tag_set - current_tags):
+                chosen_config = project_config
+
+    if chosen_config:
+        return chosen_config
+
+    if tag_set:
+        project_note = f"NO PROJECT FOUND FOR THESE TAGS: {', '.join(tags)}"
+    else:
+        project_note = "NO TAGS DEFINED TO THIS TIME ENTRY"
+
+    return {"project": project_note, "project_task": "-", "role": "-"}
+
+
+def build_dynamics_entry(timew_entry: dict, project_config: dict) -> Tuple[DynamicsEntry, bool]:
+    """Construct a DynamicsEntry from a timew record and config mapping."""
+
+    timew_start = timew_entry["start"]
+    timew_end = timew_entry["end"]
+
+    start_dt = datetime.strptime(timew_start, TIMEW_DATETIME_FORMAT)
+    end_dt = datetime.strptime(timew_end, TIMEW_DATETIME_FORMAT)
+
+    multiplier = float(project_config["multiplier"]) if "multiplier" in project_config else 1
+    duration_minutes = calculate_working_time(start_dt, end_dt, multiplier)
+
+    project_value = (
+        project_config["project_id"] if "project_id" in project_config else project_config.get("project", "")
+    )
+    project_task_value = (
+        project_config["project_task_id"]
+        if "project_task_id" in project_config
+        else project_config.get("project_task", "")
+    )
+    role_value = project_config.get("role", "")
+
+    annotation = timew_entry.get("annotation", "")
+    if "description_prefix" in project_config:
+        description = project_config["description_prefix"] + ANNOTATION_DELIMITER + annotation
+    else:
+        description = annotation
+
+    external_comment = project_config.get("external_comment", "")
+    merge_on_equal_tags = (
+        bool(project_config["merge_on_equal_tags"]) if "merge_on_equal_tags" in project_config else False
+    )
+
+    entry = DynamicsEntry(
+        date=start_dt.astimezone().strftime("%Y-%m-%d"),
+        duration=duration_minutes,
+        project=project_value,
+        project_task=project_task_value,
+        role=role_value,
+        type=DEFAULT_TYPE,
+        description=description,
+        external_comments=external_comment,
+    )
+
+    return entry, merge_on_equal_tags
+
+
+def should_merge_base(existing: DynamicsEntry, new_entry: DynamicsEntry) -> bool:
+    """Check if two entries share the attributes required for merging."""
+
+    return (
+        existing.date == new_entry.date
+        and existing.project == new_entry.project
+        and existing.project_task == new_entry.project_task
+        and existing.role == new_entry.role
+        and existing.type == new_entry.type
+    )
+
+
+def merge_entries(
+    entries: List[DynamicsEntry],
+    new_entry: DynamicsEntry,
+    merge_on_equal_tags: bool,
+    delimiter: str,
+) -> None:
+    """Merge the new entry into the list when a matching slot exists."""
+
+    for existing in entries:
+        if not should_merge_base(existing, new_entry):
             continue
 
-        #
-        # Timewarrior data
-        #
+        if existing.description == new_entry.description:
+            existing.duration += new_entry.duration
+            return
 
-        # Fields exported by `timew export` command
-        timew_id = _timew_entry["id"]
-        timew_start = _timew_entry["start"]
-        timew_end = _timew_entry["end"]
-        timew_tags = _timew_entry["tags"] if "tags" in _timew_entry else []
-        timew_annotation = _timew_entry["annotation"] if "annotation" in _timew_entry else ""
+        if merge_on_equal_tags and len(existing.description) + len(new_entry.description) <= MAX_DESCRIPTION_LENGTH:
+            existing.duration += new_entry.duration
+            existing.description = merge_annotations(existing.description, new_entry.description, delimiter)
+            return
 
-        _timew_datetime_format = "%Y%m%dT%H%M%S%z"
-        _datetime_timew_start = datetime.strptime(timew_start, _timew_datetime_format)
-        _datetime_timew_end = datetime.strptime(timew_end, _timew_datetime_format)
+        if (
+            existing.description.split(delimiter)[0] == new_entry.description.split(delimiter)[0]
+            and len(existing.description) + len(new_entry.description) <= MAX_DESCRIPTION_LENGTH
+        ):
+            existing.duration += new_entry.duration
+            note_items_without_title = delimiter.join(new_entry.description.split(delimiter)[1:])
+            existing.description = merge_annotations(existing.description, note_items_without_title, delimiter)
+            return
 
-        #
-        # Project data from configuration file
-        #
+    entries.append(new_entry)
 
-        # Get projects project which matches the timewarrior entry tags
-        _project = get_project_and_task(timew_tags)
 
-        # Get the project id or name from the configuration file
-        project = (
-            _project["project_id"] if "project_id" in _project else _project["project"] if "project" in _project else ""
-        )
+def format_csv_row(values: Sequence[str], annotation_delimiter: Optional[str]) -> str:
+    """Render the CSV row with manual quoting identical to original script."""
 
-        # Get the project task id or name from the configuration file
-        project_task = (
-            _project["project_task_id"]
-            if "project_task_id" in _project
-            else _project["project_task"]
-            if "project_task" in _project
-            else ""
-        )
+    row = list(values)
+    if annotation_delimiter:
+        row[6] = sanitize_description(row[6], annotation_delimiter)
 
-        # Get the project role from the configuration file
-        project_role = _project["role"] if "role" in _project else ""
+    escaped = [f'"{csv_escape_special_chars(value)}"' for value in row]
+    return CSV_DELIMITER.join(escaped)
 
-        # Get the time multiplier from configuration file, fallback to 1
-        multiplier = float(_project["multiplier"]) if "multiplier" in _project else 1
 
-        merge_on_equal_tags = bool(_project["merge_on_equal_tags"]) if "merge_on_equal_tags" in _project else False
+def write_output(entries: Sequence[DynamicsEntry]) -> None:
+    """Send the CSV header and rows to stdout."""
 
-        #
-        # Time Entry values
-        #
-
-        # DATE
-        # Calculate the date based on the timewarrior start time
-        time_entry_date = _datetime_timew_start.astimezone().strftime("%Y-%m-%d")
-
-        # DURATION
-        # Calculate the time entry duration
-        time_entry_duration = calculate_working_time(_datetime_timew_start, _datetime_timew_end, multiplier)
-
-        # TYPE
-        time_entry_type = "Work"
-
-        # PROJECT
-        time_entry_project = project
-
-        # PROJECT TASK
-        time_entry_project_task = project_task
-
-        # ROLE
-        time_entry_role = project_role
-
-        # DESCRIPTION
-        # Set the time entry description from the timewarrior annotation
-        # and optionally prefixed with a value from the configuration file
-        if "description_prefix" in _project:
-            time_entry_description = _project["description_prefix"] + timew_annotation_delimiter + timew_annotation
-        else:
-            time_entry_description = timew_annotation
-
-        # time_entry_description = improve_description_with_ai(time_entry_description)
-
-        # EXTERNAL COMMENT
-        # set the external comment to a value from the configuration file, if any
-        if "external_comment" in _project:
-            time_entry_external_comment = _project["external_comment"]
-        else:
-            time_entry_external_comment = ""
-
-        #
-        # Transform timewarrior tracks zu time entries
-        #
-
-        for i, dynamics_time_entry in enumerate(dynamics_time_entries):
-            (
-                _date,
-                _duration,
-                _project,
-                _project_task,
-                _role,
-                _type,
-                _description,
-                _external_comments,
-            ) = tuple(dynamics_time_entry)
-
-            # If there is already an time entry with the same data, add duration up
-            if (
-                _date == time_entry_date
-                and _project == time_entry_project
-                and _project_task == time_entry_project_task
-                and _role == time_entry_role
-                and _type == time_entry_type
-                and _description == time_entry_description
-            ):
-                # Add up duration
-                _time_entry_duration_added_up = int(_duration) + time_entry_duration
-
-                # Overwrite existing entry with new duration
-                dynamics_time_entries[i] = [
-                    time_entry_date,
-                    str(_time_entry_duration_added_up),
-                    time_entry_project,
-                    time_entry_project_task,
-                    time_entry_role,
-                    time_entry_type,
-                    time_entry_description,
-                    time_entry_external_comment,
-                ]
-                break
-
-            # Merge on same first line – merge_on_equal_tags=True
-
-            elif (
-                _date == time_entry_date
-                and _project == time_entry_project
-                and _project_task == time_entry_project_task
-                and _role == time_entry_role
-                and _type == time_entry_type
-                and merge_on_equal_tags
-                and len(_description) + len(time_entry_description) <= dynamics_max_description_length
-            ):
-                _time_entry_duration_added_up = int(_duration) + time_entry_duration
-
-                _merged_notes = timew_annotation_delimiter.join([_description, time_entry_description])
-                _uniq_merged_notes = []
-                for n in _merged_notes.split(timew_annotation_delimiter):
-                    if n not in _uniq_merged_notes:
-                        _uniq_merged_notes.append(n)
-                _uniq_merged_notes_string = timew_annotation_delimiter.join(_uniq_merged_notes)
-
-                dynamics_time_entries[i] = [
-                    time_entry_date,
-                    str(_time_entry_duration_added_up),
-                    time_entry_project,
-                    time_entry_project_task,
-                    time_entry_role,
-                    time_entry_type,
-                    _uniq_merged_notes_string,
-                    time_entry_external_comment,
-                ]
-                break
-
-            # Merge on same first line
-
-            elif (
-                _date == time_entry_date
-                and _project == time_entry_project
-                and _project_task == time_entry_project_task
-                and _role == time_entry_role
-                and _type == time_entry_type
-                and _description.split(timew_annotation_delimiter)[0]
-                == time_entry_description.split(timew_annotation_delimiter)[0]
-                and len(_description) + len(time_entry_description) <= dynamics_max_description_length
-            ):
-                _time_entry_duration_added_up = int(_duration) + time_entry_duration
-
-                note_items_without_title = timew_annotation_delimiter.join(
-                    time_entry_description.split(timew_annotation_delimiter)[1:]
-                )
-                _merged_notes = timew_annotation_delimiter.join([_description, note_items_without_title])
-                _uniq_merged_notes = []
-                for n in _merged_notes.split(timew_annotation_delimiter):
-                    if n not in _uniq_merged_notes:
-                        _uniq_merged_notes.append(n)
-                _uniq_merged_notes_string = timew_annotation_delimiter.join(_uniq_merged_notes)
-
-                dynamics_time_entries[i] = [
-                    time_entry_date,
-                    str(_time_entry_duration_added_up),
-                    time_entry_project,
-                    time_entry_project_task,
-                    time_entry_role,
-                    time_entry_type,
-                    _uniq_merged_notes_string,
-                    time_entry_external_comment,
-                ]
-                break
-
-        #
-        # Add time entry
-        #
-
-        else:
-            dynamics_time_entries.append(
-                [
-                    time_entry_date,
-                    str(time_entry_duration),
-                    time_entry_project,
-                    time_entry_project_task,
-                    time_entry_role,
-                    time_entry_type,
-                    time_entry_description,
-                    time_entry_external_comment,
-                ]
-            )
-
-    #
-    # stdout
-    #
-
-    print_line(
-        [
-            "Date",
-            "Duration",
-            "Project",
-            "Project Task",
-            "Role",
-            "Type",
-            "Description",
-            "External Comments",
-        ]
+    header = (
+        "Date",
+        "Duration",
+        "Project",
+        "Project Task",
+        "Role",
+        "Type",
+        "Description",
+        "External Comments",
     )
-    for i, dynamics_time_entry in enumerate(dynamics_time_entries):
-        end = None
-        if i + 1 == len(dynamics_time_entries):
-            end = ""
-        print_line(dynamics_time_entry, timew_annotation_delimiter, end=end)
+    sys.stdout.write(format_csv_row(header, None) + "\n")
+
+    for index, entry in enumerate(entries):
+        line = format_csv_row(entry.as_row(), ANNOTATION_DELIMITER)
+        if index + 1 == len(entries):
+            sys.stdout.write(line)
+        else:
+            sys.stdout.write(line + "\n")
+
+
+def main() -> None:
+    project_configs = load_project_configuration()
+    timew_entries = parse_timew_export(sys.stdin)
+
+    dynamics_entries: List[DynamicsEntry] = []
+    for timew_entry in timew_entries:
+        if "end" not in timew_entry:
+            continue
+
+        tags = timew_entry.get("tags", [])
+        project_config = resolve_project_config(tags, project_configs)
+        entry, merge_on_equal_tags = build_dynamics_entry(timew_entry, project_config)
+        merge_entries(
+            dynamics_entries,
+            entry,
+            merge_on_equal_tags,
+            ANNOTATION_DELIMITER,
+        )
+
+    write_output(dynamics_entries)
+
+
+if __name__ == "__main__":
+    main()
