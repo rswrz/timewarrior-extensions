@@ -11,7 +11,8 @@ import sys
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
-ANNOTATION_DELIMITER = "; "
+DEFAULT_ANNOTATION_DELIMITER = "; "
+ANNOTATION_DELIMITER_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_ANNOTATION_DELIMITER"
 CSV_DELIMITER = ","
 MAX_DESCRIPTION_LENGTH = 500
 CONFIG_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON"
@@ -31,6 +32,7 @@ class DynamicsEntry:
     type: str
     description: str
     external_comments: str
+    annotation_delimiter: str
 
     def as_row(self) -> List[str]:
         return [
@@ -138,7 +140,11 @@ def resolve_project_config(tags: Sequence[str], project_configs: Sequence[dict])
     return {"project": project_note, "project_task": "-", "role": "-"}
 
 
-def build_dynamics_entry(timew_entry: dict, project_config: dict) -> Tuple[DynamicsEntry, bool]:
+def build_dynamics_entry(
+    timew_entry: dict,
+    project_config: dict,
+    annotation_delimiter_override: Optional[str] = None,
+) -> Tuple[DynamicsEntry, bool]:
     """Construct a DynamicsEntry from a timew record and config mapping."""
 
     timew_start = timew_entry["start"]
@@ -161,8 +167,15 @@ def build_dynamics_entry(timew_entry: dict, project_config: dict) -> Tuple[Dynam
     role_value = project_config.get("role", "")
 
     annotation = timew_entry.get("annotation", "")
+    if annotation_delimiter_override is not None:
+        annotation_delimiter = annotation_delimiter_override
+    else:
+        annotation_delimiter = project_config.get("annotation_delimiter", DEFAULT_ANNOTATION_DELIMITER)
+    if not annotation_delimiter:
+        annotation_delimiter = DEFAULT_ANNOTATION_DELIMITER
+
     if "description_prefix" in project_config:
-        description = project_config["description_prefix"] + ANNOTATION_DELIMITER + annotation
+        description = project_config["description_prefix"] + annotation_delimiter + annotation
     else:
         description = annotation
 
@@ -182,6 +195,7 @@ def build_dynamics_entry(timew_entry: dict, project_config: dict) -> Tuple[Dynam
         type=entry_type,
         description=description,
         external_comments=external_comment,
+        annotation_delimiter=annotation_delimiter,
     )
 
     return entry, merge_on_equal_tags
@@ -196,6 +210,7 @@ def should_merge_base(existing: DynamicsEntry, new_entry: DynamicsEntry) -> bool
         and existing.project_task == new_entry.project_task
         and existing.role == new_entry.role
         and existing.type == new_entry.type
+        and existing.annotation_delimiter == new_entry.annotation_delimiter
     )
 
 
@@ -203,13 +218,14 @@ def merge_entries(
     entries: List[DynamicsEntry],
     new_entry: DynamicsEntry,
     merge_on_equal_tags: bool,
-    delimiter: str,
 ) -> None:
     """Merge the new entry into the list when a matching slot exists."""
 
     for existing in entries:
         if not should_merge_base(existing, new_entry):
             continue
+
+        delimiter = existing.annotation_delimiter
 
         if existing.description == new_entry.description:
             existing.duration += new_entry.duration
@@ -220,8 +236,11 @@ def merge_entries(
             existing.description = merge_annotations(existing.description, new_entry.description, delimiter)
             return
 
+        existing_title = existing.description.split(delimiter)[0]
+        new_title = new_entry.description.split(delimiter)[0]
+
         if (
-            existing.description.split(delimiter)[0] == new_entry.description.split(delimiter)[0]
+            existing_title == new_title
             and len(existing.description) + len(new_entry.description) <= MAX_DESCRIPTION_LENGTH
         ):
             existing.duration += new_entry.duration
@@ -259,7 +278,7 @@ def write_output(entries: Sequence[DynamicsEntry]) -> None:
     sys.stdout.write(format_csv_row(header, None) + "\n")
 
     for index, entry in enumerate(entries):
-        line = format_csv_row(entry.as_row(), ANNOTATION_DELIMITER)
+        line = format_csv_row(entry.as_row(), entry.annotation_delimiter)
         if index + 1 == len(entries):
             sys.stdout.write(line)
         else:
@@ -269,6 +288,7 @@ def write_output(entries: Sequence[DynamicsEntry]) -> None:
 def main() -> None:
     project_configs = load_project_configuration()
     timew_entries = parse_timew_export(sys.stdin)
+    annotation_delimiter_override = os.getenv(ANNOTATION_DELIMITER_ENV_VAR)
 
     dynamics_entries: List[DynamicsEntry] = []
     for timew_entry in timew_entries:
@@ -277,12 +297,15 @@ def main() -> None:
 
         tags = timew_entry.get("tags", [])
         project_config = resolve_project_config(tags, project_configs)
-        entry, merge_on_equal_tags = build_dynamics_entry(timew_entry, project_config)
+        entry, merge_on_equal_tags = build_dynamics_entry(
+            timew_entry,
+            project_config,
+            annotation_delimiter_override,
+        )
         merge_entries(
             dynamics_entries,
             entry,
             merge_on_equal_tags,
-            ANNOTATION_DELIMITER,
         )
 
     write_output(dynamics_entries)
