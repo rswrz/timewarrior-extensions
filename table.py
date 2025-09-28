@@ -76,7 +76,10 @@ def build_annotation_lines(entry: Dict[str, object]) -> List[str]:
             processed.append(line)
             continue
 
-        chunks = [line[i : i + MAX_ANNOTATION_WIDTH] for i in range(0, len(line), MAX_ANNOTATION_WIDTH)]
+        chunks = [
+            line[i : i + MAX_ANNOTATION_WIDTH]
+            for i in range(0, len(line), MAX_ANNOTATION_WIDTH)
+        ]
         processed.append(chunks[0])
         processed.extend(f"  {chunk}" for chunk in chunks[1:])
 
@@ -116,7 +119,11 @@ def compute_column_widths(entries: Sequence[TimewEntry]) -> Dict[str, int]:
             max_id_len = id_len
 
         annotation_for_width = entry.raw.get("annotation", "")
-        annotation_segments = annotation_for_width.replace(";", "\n").split("\n") if annotation_for_width else [""]
+        annotation_segments = (
+            annotation_for_width.replace(";", "\n").split("\n")
+            if annotation_for_width
+            else [""]
+        )
         for index, segment in enumerate(annotation_segments):
             segment_len = len(segment.strip())
             if index > 0:
@@ -162,7 +169,9 @@ def should_print_total(current: TimewEntry, next_entry: Optional[TimewEntry]) ->
     return next_entry.start.date() > current.start.date()
 
 
-def next_day_gap(current: TimewEntry, next_entry: Optional[TimewEntry], layout: str) -> Optional[str]:
+def next_day_gap(
+    current: TimewEntry, next_entry: Optional[TimewEntry], layout: str
+) -> Optional[str]:
     if next_entry is None or current.end is None:
         return None
     if next_entry.start.date() > current.start.date():
@@ -227,7 +236,9 @@ def render_rows(entries: Sequence[TimewEntry], layout: str) -> timedelta:
         for continuation in annotation_lines[1:]:
             prefix = ANSI_ROW_ALT if index % 2 else ""
             suffix = ANSI_RESET if prefix else ""
-            print(f"{prefix}{layout.format(' ', ' ', ' ', ' ', ' ', continuation, ' ', ' ', ' ', ' ')}{suffix}")
+            print(
+                f"{prefix}{layout.format(' ', ' ', ' ', ' ', ' ', continuation, ' ', ' ', ' ', ' ')}{suffix}"
+            )
 
         gap_row = next_day_gap(entry, next_entry, layout)
         if gap_row:
@@ -252,7 +263,9 @@ def format_total_line(total: timedelta, widths: Dict[str, int]) -> List[str]:
         + 8
     )
     total_str = format_timedelta(total)
-    underline = f"{{:>{spaces + len(ANSI_UNDERLINE)}}}".format(ANSI_UNDERLINE + (len(total_str) * " "))
+    underline = f"{{:>{spaces + len(ANSI_UNDERLINE)}}}".format(
+        ANSI_UNDERLINE + (len(total_str) * " ")
+    )
     underline_reset = underline + ANSI_RESET
     total_line = f"{{:>{spaces}}}".format(total_str)
     return [underline_reset, total_line]
@@ -273,7 +286,20 @@ if __name__ == "__main__":
     layout = build_layout(widths)
 
     header = build_header(layout)
-    print(header.format("Wk", "Date", "Day", "ID", "Tags", "Annotation", "Start", "End", "Time", "Total"))
+    print(
+        header.format(
+            "Wk",
+            "Date",
+            "Day",
+            "ID",
+            "Tags",
+            "Annotation",
+            "Start",
+            "End",
+            "Time",
+            "Total",
+        )
+    )
 
     total_duration = render_rows(parsed_entries, layout)
 

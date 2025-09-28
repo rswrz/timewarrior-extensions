@@ -127,12 +127,20 @@ class LLMRefiner:
         api_key = os.getenv(OPENAI_API_KEY_ENV_VAR)
 
         try:
-            temperature = float(temperature_value) if temperature_value is not None else DEFAULT_LLM_TEMPERATURE
+            temperature = (
+                float(temperature_value)
+                if temperature_value is not None
+                else DEFAULT_LLM_TEMPERATURE
+            )
         except ValueError:
             temperature = DEFAULT_LLM_TEMPERATURE
 
         try:
-            timeout = float(timeout_value) if timeout_value is not None else DEFAULT_LLM_TIMEOUT
+            timeout = (
+                float(timeout_value)
+                if timeout_value is not None
+                else DEFAULT_LLM_TIMEOUT
+            )
         except ValueError:
             timeout = DEFAULT_LLM_TIMEOUT
 
@@ -166,7 +174,9 @@ class LLMRefiner:
         effective_temperature = overrides.get("temperature", self.temperature)
         effective_endpoint = overrides.get("endpoint", self.endpoint)
         effective_timeout = overrides.get("timeout", self.timeout)
-        effective_provider = str(overrides.get("provider", self.provider)).strip().lower()
+        effective_provider = (
+            str(overrides.get("provider", self.provider)).strip().lower()
+        )
         if effective_provider not in {"ollama", "openai"}:
             effective_provider = self.provider
         effective_api_key = overrides.get("api_key", self.api_key)
@@ -217,7 +227,9 @@ class LLMRefiner:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        prompt = self._build_prompt(description, visible_segments, delimiter, output_separator, context)
+        prompt = self._build_prompt(
+            description, visible_segments, delimiter, output_separator, context
+        )
         if effective_provider == "openai":
             payload: Dict[str, Any] = {
                 "model": effective_model,
@@ -281,7 +293,9 @@ class LLMRefiner:
         output_separator: str,
         context: Dict[str, str],
     ) -> str:
-        context_lines = [f"{key.title()}: {value}" for key, value in context.items() if value]
+        context_lines = [
+            f"{key.title()}: {value}" for key, value in context.items() if value
+        ]
         context_block = "\n".join(context_lines) if context_lines else "None"
         segments_json = json.dumps(list(segments), ensure_ascii=False)
 
@@ -356,7 +370,9 @@ class LLMRefiner:
         return [str(item) for item in parsed]
 
 
-def calculate_working_time(datetime_start: datetime, datetime_end: datetime, multiplier: float = 1) -> int:
+def calculate_working_time(
+    datetime_start: datetime, datetime_end: datetime, multiplier: float = 1
+) -> int:
     """Return minutes rounded up to 15-minute blocks after applying multiplier."""
 
     datetime_delta = datetime_end - datetime_start
@@ -386,7 +402,11 @@ def sanitize_description(
         return text
 
     parts = text.split(input_delimiter)
-    visible_parts = [element for element in parts if not (element.startswith("++") and element.endswith("++"))]
+    visible_parts = [
+        element
+        for element in parts
+        if not (element.startswith("++") and element.endswith("++"))
+    ]
     return output_separator.join(visible_parts)
 
 
@@ -427,7 +447,9 @@ def parse_timew_export(stream: Iterable[str]) -> List[dict]:
     return json.loads(payload) if payload else []
 
 
-def resolve_project_config(tags: Sequence[str], project_configs: Sequence[dict]) -> dict:
+def resolve_project_config(
+    tags: Sequence[str], project_configs: Sequence[dict]
+) -> dict:
     """Return the project configuration matching the provided tags."""
 
     tag_set = set(tags)
@@ -470,11 +492,15 @@ def build_dynamics_entry(
     start_dt = datetime.strptime(timew_start, TIMEW_DATETIME_FORMAT)
     end_dt = datetime.strptime(timew_end, TIMEW_DATETIME_FORMAT)
 
-    multiplier = float(project_config["multiplier"]) if "multiplier" in project_config else 1
+    multiplier = (
+        float(project_config["multiplier"]) if "multiplier" in project_config else 1
+    )
     duration_minutes = calculate_working_time(start_dt, end_dt, multiplier)
 
     project_value = (
-        project_config["project_id"] if "project_id" in project_config else project_config.get("project", "")
+        project_config["project_id"]
+        if "project_id" in project_config
+        else project_config.get("project", "")
     )
     project_task_value = (
         project_config["project_task_id"]
@@ -487,25 +513,33 @@ def build_dynamics_entry(
     if annotation_delimiter_override is not None:
         annotation_delimiter = annotation_delimiter_override
     else:
-        annotation_delimiter = project_config.get("annotation_delimiter", DEFAULT_ANNOTATION_DELIMITER)
+        annotation_delimiter = project_config.get(
+            "annotation_delimiter", DEFAULT_ANNOTATION_DELIMITER
+        )
     if not annotation_delimiter:
         annotation_delimiter = DEFAULT_ANNOTATION_DELIMITER
 
     if output_separator_override is not None:
         output_separator = output_separator_override
     else:
-        output_separator = project_config.get("annotation_output_separator", DEFAULT_OUTPUT_SEPARATOR)
+        output_separator = project_config.get(
+            "annotation_output_separator", DEFAULT_OUTPUT_SEPARATOR
+        )
     if output_separator is None or output_separator == "":
         output_separator = DEFAULT_OUTPUT_SEPARATOR
 
     if "description_prefix" in project_config:
-        description = project_config["description_prefix"] + annotation_delimiter + annotation
+        description = (
+            project_config["description_prefix"] + annotation_delimiter + annotation
+        )
     else:
         description = annotation
 
     external_comment = project_config.get("external_comment", "")
     merge_on_equal_tags = (
-        bool(project_config["merge_on_equal_tags"]) if "merge_on_equal_tags" in project_config else False
+        bool(project_config["merge_on_equal_tags"])
+        if "merge_on_equal_tags" in project_config
+        else False
     )
 
     entry_type = project_config.get("type", DEFAULT_TYPE)
@@ -580,9 +614,15 @@ def merge_entries(
             existing.duration += new_entry.duration
             return
 
-        if merge_on_equal_tags and len(existing.description) + len(new_entry.description) <= MAX_DESCRIPTION_LENGTH:
+        if (
+            merge_on_equal_tags
+            and len(existing.description) + len(new_entry.description)
+            <= MAX_DESCRIPTION_LENGTH
+        ):
             existing.duration += new_entry.duration
-            existing.description = merge_annotations(existing.description, new_entry.description, delimiter)
+            existing.description = merge_annotations(
+                existing.description, new_entry.description, delimiter
+            )
             return
 
         existing_title = existing.description.split(delimiter)[0]
@@ -590,11 +630,16 @@ def merge_entries(
 
         if (
             existing_title == new_title
-            and len(existing.description) + len(new_entry.description) <= MAX_DESCRIPTION_LENGTH
+            and len(existing.description) + len(new_entry.description)
+            <= MAX_DESCRIPTION_LENGTH
         ):
             existing.duration += new_entry.duration
-            note_items_without_title = delimiter.join(new_entry.description.split(delimiter)[1:])
-            existing.description = merge_annotations(existing.description, note_items_without_title, delimiter)
+            note_items_without_title = delimiter.join(
+                new_entry.description.split(delimiter)[1:]
+            )
+            existing.description = merge_annotations(
+                existing.description, note_items_without_title, delimiter
+            )
             return
 
     entries.append(new_entry)
@@ -632,7 +677,9 @@ def write_output(entries: Sequence[DynamicsEntry]) -> None:
     sys.stdout.write(format_csv_row(header, None, None) + "\n")
 
     for index, entry in enumerate(entries):
-        line = format_csv_row(entry.as_row(), entry.annotation_delimiter, entry.output_separator)
+        line = format_csv_row(
+            entry.as_row(), entry.annotation_delimiter, entry.output_separator
+        )
         if index + 1 == len(entries):
             sys.stdout.write(line)
         else:

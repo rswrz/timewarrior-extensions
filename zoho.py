@@ -41,7 +41,9 @@ class ZohoEntry:
         ]
 
 
-def calculate_working_time(start: datetime, end: datetime, multiplier: float = 1.0) -> timedelta:
+def calculate_working_time(
+    start: datetime, end: datetime, multiplier: float = 1.0
+) -> timedelta:
     """Return a timedelta rounded up to 15-minute blocks after applying multiplier."""
 
     total_seconds = (end - start).total_seconds()
@@ -76,7 +78,9 @@ def parse_timew_export(stream: Iterable[str]) -> List[Dict[str, object]]:
     return json.loads(payload) if payload else []
 
 
-def resolve_project_config(tags: Sequence[str], project_configs: Sequence[Dict[str, object]]) -> Dict[str, object]:
+def resolve_project_config(
+    tags: Sequence[str], project_configs: Sequence[Dict[str, object]]
+) -> Dict[str, object]:
     """Return the project configuration matching the provided tags."""
 
     tag_set = set(tags)
@@ -98,8 +102,7 @@ def resolve_project_config(tags: Sequence[str], project_configs: Sequence[Dict[s
         return matched_config
 
     return {
-        "project_name": "NO PROJECT FOUND FOR THESE TAGS: {}".format(", ".join(tags)
-        ),
+        "project_name": "NO PROJECT FOUND FOR THESE TAGS: {}".format(", ".join(tags)),
         "task_name": "",
     }
 
@@ -184,7 +187,9 @@ def write_output(entries: Sequence[ZohoEntry]) -> None:
         print(format_csv_row(row))
 
 
-def build_entry(track: Dict[str, object], project_config: Dict[str, object]) -> Optional[ZohoEntry]:
+def build_entry(
+    track: Dict[str, object], project_config: Dict[str, object]
+) -> Optional[ZohoEntry]:
     """Create a ZohoEntry for the provided time track if it has ended."""
 
     if "end" not in track:
@@ -201,12 +206,16 @@ def build_entry(track: Dict[str, object], project_config: Dict[str, object]) -> 
     start = datetime.strptime(track["start"], TIMEW_DATETIME_FORMAT)
     end = datetime.strptime(track["end"], TIMEW_DATETIME_FORMAT)
 
-    multiplier = float(project_config["multiplier"]) if "multiplier" in project_config else 1.0
+    multiplier = (
+        float(project_config["multiplier"]) if "multiplier" in project_config else 1.0
+    )
     time_spent = calculate_working_time(start, end, multiplier)
 
     project_name = project_config.get("project_name", "")
     task_name = project_config.get("task_name", "")
-    billable_status = "Billable" if project_config.get("billable") is True else "Non Billable"
+    billable_status = (
+        "Billable" if project_config.get("billable") is True else "Non Billable"
+    )
 
     return ZohoEntry(
         date=start.astimezone().strftime("%Y-%m-%d"),
