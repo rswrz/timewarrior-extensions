@@ -4,7 +4,8 @@ A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](ht
 
 ## Extensions
 
-- `dynamics.py` — Export + merge entries to CSV (Dynamics‑ready), with tag→project mapping, rounding, and optional LLM description refinement. See [`docs/dynamics.md`](docs/dynamics.md)
+- `dynamics_csv.py` — Export + merge entries to CSV (Dynamics‑ready), with tag→project mapping, rounding, and optional LLM description refinement. See [`docs/dynamics_csv.md`](docs/dynamics_csv.md)
+- `dynamics_summary.py` — Table view using Dynamics logic (merging, rounding, config). See [`docs/dynamics_summary.md`](docs/dynamics_summary.md)
 - `zoho.py` — Export entries to a Zoho-compatible CSV with tag-based project/task mapping and note merging. See [`docs/zoho.md`](docs/zoho.md)
 - `csv.py` — Output raw `timew export` entries as a simple CSV. See [`docs/csv.md`](docs/csv.md)
 - `table.py` — Colorized summary view with annotations, gaps, and totals. See [`docs/table.md`](docs/table.md)
