@@ -5,9 +5,9 @@ Export and consolidate Timewarrior entries into a CSV ready for external systems
 ## Usage
 
 - As a Timewarrior report (recommended):
-  - `timew report dynamics :week > times.csv`
+  - `timew report dynamics_csv :week > times.csv`
 - Or by piping JSON from `timew export`:
-  - `timew export :week | ./dynamics.py > times.csv`
+  - `timew export :week | ./dynamics_csv.py > times.csv`
 
 The script reads the Timewarrior report input from stdin per the Timewarrior extensions API and writes a CSV to stdout.
 
