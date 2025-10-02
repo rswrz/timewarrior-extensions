@@ -13,4 +13,4 @@ A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](ht
 
 ## Useful Aliases & Functions
 
-For a set of helpful aliases and shell functions, visit the <https://github.com/rswrz/timewarrior>.
+For a set of helpful aliases and shell functions, visit the <https://github.com/rswrz/timewarrior-omz>.
