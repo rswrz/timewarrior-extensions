@@ -4,7 +4,10 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-import json
+try:
+    import json5 as json
+except ImportError:
+    import json
 import math
 import os
 import sys
