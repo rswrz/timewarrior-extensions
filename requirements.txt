@@ -1,0 +1,15 @@
+# Optional dependencies for enhanced JSON5 support
+# JSON5 parser for configuration files with comments and relaxed syntax
+json5>=0.9.0
+
+# Note: All other imports in this project are from Python's standard library:
+# - dataclasses (Python 3.7+)
+# - datetime
+# - json
+# - math
+# - os
+# - sys
+# - socket
+# - typing
+# - urllib
+# - __future__

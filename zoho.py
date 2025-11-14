@@ -6,7 +6,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import json
+try:
+    import json5 as json
+except ImportError:
+    import json
 import math
 import os
 import sys
