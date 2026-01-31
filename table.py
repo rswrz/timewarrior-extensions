@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import json
 import sys
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -32,7 +32,7 @@ class TimewEntry:
     @property
     def duration(self) -> timedelta:
         if self.end is None:
-            now = datetime.now(tz=timezone.utc).replace(microsecond=0)
+            now = datetime.now(tz=self.start.tzinfo or timezone.utc).replace(microsecond=0)
             return now - self.start
         return self.end - self.start
 
@@ -44,12 +44,46 @@ class TimewEntry:
 def read_configuration(stream: Iterable[str]) -> Dict[str, str]:
     config: Dict[str, str] = {}
     for line in stream:
-        if line == "\n":
+        if line.strip() == "":
             break
         key, _, remainder = line.partition(": ")
         value = remainder.rstrip("\n")
         config[key] = value
     return config
+
+
+def parse_header_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+
+    cleaned = value.strip()
+    if cleaned.endswith("Z") and len(cleaned) > 1:
+        cleaned = f"{cleaned[:-1]}+0000"
+
+    formats = [TIMEW_DATE_FORMAT, "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d"]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(cleaned, fmt)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+            return parsed
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_report_range(config: Dict[str, str]) -> tuple[Optional[datetime], Optional[datetime]]:
+    start_value = config.get("temp.report.start")
+    end_value = config.get("temp.report.end")
+    if not end_value:
+        return None, None
+    start_dt = parse_header_datetime(start_value)
+    end_dt = parse_header_datetime(end_value)
+    if start_dt and end_dt:
+        local_end = end_dt.astimezone()
+        if local_end.time() == time.min and local_end.date() > start_dt.astimezone().date():
+            end_dt = end_dt - timedelta(days=1)
+    return start_dt, end_dt
 
 
 def read_entries(stream: Iterable[str]) -> List[Dict[str, object]]:
@@ -58,14 +92,16 @@ def read_entries(stream: Iterable[str]) -> List[Dict[str, object]]:
 
 
 def join_tags(entry: Dict[str, object]) -> str:
-    tags = entry.get("tags", [])
-    return ", ".join(str(tag) for tag in tags)
+    raw_tags = entry.get("tags", [])
+    if not isinstance(raw_tags, list):
+        return ""
+    return ", ".join(str(tag) for tag in raw_tags)
 
 
 def build_annotation_lines(entry: Dict[str, object]) -> List[str]:
     raw_annotation = entry.get("annotation", "")
     if raw_annotation:
-        annotation_text = raw_annotation.replace("; ", "\n")
+        annotation_text = str(raw_annotation).replace("; ", "\n")
     else:
         annotation_text = "-"
 
@@ -89,9 +125,12 @@ def build_annotation_lines(entry: Dict[str, object]) -> List[str]:
 def parse_timew_entries(entries: Sequence[Dict[str, object]]) -> List[TimewEntry]:
     parsed_entries: List[TimewEntry] = []
     for entry in entries:
-        start = datetime.strptime(entry["start"], TIMEW_DATE_FORMAT)
+        start_raw = entry.get("start")
+        if not start_raw:
+            continue
+        start = datetime.strptime(str(start_raw), TIMEW_DATE_FORMAT)
         end_value = entry.get("end")
-        end = datetime.strptime(end_value, TIMEW_DATE_FORMAT) if end_value else None
+        end = datetime.strptime(str(end_value), TIMEW_DATE_FORMAT) if end_value else None
         parsed_entries.append(
             TimewEntry(
                 raw=entry,
@@ -102,6 +141,75 @@ def parse_timew_entries(entries: Sequence[Dict[str, object]]) -> List[TimewEntry
             )
         )
     return parsed_entries
+
+
+def format_timew_timestamp(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime(TIMEW_DATE_FORMAT)
+
+
+def split_entries_by_day(
+    entries: Sequence[TimewEntry],
+    range_start: Optional[datetime],
+    range_end: Optional[datetime],
+) -> List[TimewEntry]:
+    split_entries: List[TimewEntry] = []
+
+    start_date = range_start.astimezone().date() if range_start else None
+    end_date = range_end.astimezone().date() if range_end else None
+
+    for entry in entries:
+        start_local = entry.start.astimezone()
+        end_value = entry.end
+        if end_value is None:
+            end_value = datetime.now(tz=timezone.utc).replace(microsecond=0)
+        end_local = end_value.astimezone()
+
+        if end_local <= start_local:
+            continue
+
+        current_day = start_local.date()
+        last_day = end_local.date()
+        tzinfo = start_local.tzinfo
+
+        while current_day <= last_day:
+            if start_date and current_day < start_date:
+                current_day += timedelta(days=1)
+                continue
+            if end_date and current_day > end_date:
+                break
+
+            day_start = datetime.combine(current_day, time.min, tzinfo=tzinfo)
+            day_end = day_start + timedelta(days=1)
+            segment_start = max(start_local, day_start)
+            segment_end = min(end_local, day_end)
+            if segment_end <= segment_start:
+                current_day += timedelta(days=1)
+                continue
+
+            segment_end_value: Optional[datetime] = segment_end
+            if entry.end is None and current_day == end_local.date() and segment_end == end_local:
+                segment_end_value = None
+
+            raw = dict(entry.raw)
+            raw["start"] = format_timew_timestamp(segment_start)
+            if segment_end_value is None:
+                raw.pop("end", None)
+            else:
+                raw["end"] = format_timew_timestamp(segment_end)
+
+            split_entries.append(
+                TimewEntry(
+                    raw=raw,
+                    start=segment_start,
+                    end=segment_end_value,
+                    tags=entry.tags,
+                    annotation_lines=entry.annotation_lines,
+                )
+            )
+
+            current_day += timedelta(days=1)
+
+    return split_entries
 
 
 def compute_column_widths(entries: Sequence[TimewEntry]) -> Dict[str, int]:
@@ -120,7 +228,7 @@ def compute_column_widths(entries: Sequence[TimewEntry]) -> Dict[str, int]:
 
         annotation_for_width = entry.raw.get("annotation", "")
         annotation_segments = (
-            annotation_for_width.replace(";", "\n").split("\n")
+            str(annotation_for_width).replace(";", "\n").split("\n")
             if annotation_for_width
             else [""]
         )
@@ -154,7 +262,9 @@ def build_header(layout: str) -> str:
 
 
 def local_time_string(moment: datetime) -> str:
-    return moment.replace(tzinfo=timezone.utc).astimezone(tz=None).strftime("%H:%M:%S")
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(tz=None).strftime("%H:%M:%S")
 
 
 def should_reset_day(previous: Optional[TimewEntry], current: TimewEntry) -> bool:
@@ -279,9 +389,11 @@ def format_timedelta(value: timedelta) -> str:
 
 
 if __name__ == "__main__":
-    _ = read_configuration(sys.stdin)
+    config = read_configuration(sys.stdin)
     raw_entries = read_entries(sys.stdin)
     parsed_entries = parse_timew_entries(raw_entries)
+    range_start, range_end = resolve_report_range(config)
+    parsed_entries = split_entries_by_day(parsed_entries, range_start, range_end)
     widths = compute_column_widths(parsed_entries)
     layout = build_layout(widths)
 
