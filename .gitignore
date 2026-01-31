@@ -1,2 +1,7 @@
 .dynamics_config.json
 .zoho_config.json
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
