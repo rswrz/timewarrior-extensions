@@ -9,6 +9,8 @@ A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](ht
 - `zoho.py` — Export entries to a Zoho-compatible CSV with tag-based project/task mapping and note merging. See [`docs/zoho.md`](docs/zoho.md)
 - `csv.py` — Output raw `timew export` entries as a simple CSV. See [`docs/csv.md`](docs/csv.md)
 - `table.py` — Colorized summary view with annotations, gaps, and totals. See [`docs/table.md`](docs/table.md)
+- `overtime_summary.py` — Overtime report with configurable work hours and leave days. See [`docs/overtime_summary.md`](docs/overtime_summary.md)
+- `overtime_csv.py` — CSV export of overtime calculations. See [`docs/overtime_csv.md`](docs/overtime_csv.md)
 - `debug.py` — Print the incoming Timewarrior payload to stdout unchanged (handy for troubleshooting pipelines).
 
 ## JSON5 Support (Optional)
