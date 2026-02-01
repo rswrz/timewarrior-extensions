@@ -7,6 +7,16 @@ from __future__ import annotations
 import sys
 from typing import List, Sequence, Tuple
 
+from summary_table_printer import (
+    ANSI_FG_RESET,
+    ANSI_RESET,
+    ANSI_UNDERLINE,
+    ColumnSpec,
+    Style,
+    compute_widths,
+    render_header,
+    render_rows,
+)
 from overtime_common import (
     DaySummary,
     build_overtime_summaries,
@@ -17,11 +27,8 @@ from overtime_common import (
     resolve_report_range,
 )
 
-ANSI_RESET = "\033[0m"
-ANSI_UNDERLINE = "\033[4m"
 ANSI_RED = "\033[31m"
 ANSI_GREEN = "\033[32m"
-ALIGNMENTS = ["<", "<", "<", ">", ">", ">"]
 
 
 def format_overtime_minutes(minutes: int) -> str:
@@ -34,41 +41,6 @@ def format_overtime_minutes(minutes: int) -> str:
     total = abs(minutes)
     hours, remainder = divmod(total, 60)
     return f"{sign}{hours}:{remainder:02d}"
-
-
-def compute_column_widths(
-    rows: Sequence[Sequence[str]], headers: Sequence[str]
-) -> List[int]:
-    widths = [len(header) for header in headers]
-    for row in rows:
-        for index, cell in enumerate(row):
-            widths[index] = max(widths[index], len(cell))
-    return widths
-
-
-def format_row(
-    row: Sequence[str],
-    widths: Sequence[int],
-    overtime_sign: int = 0,
-) -> str:
-    rendered: List[str] = []
-    for index, (cell, width, align) in enumerate(zip(row, widths, ALIGNMENTS)):
-        formatted = f"{cell:{align}{width}}"
-        if index == 5 and overtime_sign:
-            if overtime_sign < 0:
-                formatted = f"{ANSI_RED}{formatted}{ANSI_RESET}"
-            else:
-                formatted = f"{ANSI_GREEN}{formatted}{ANSI_RESET}"
-        rendered.append(formatted)
-    return " ".join(rendered)
-
-
-def print_header(widths: Sequence[int], headers: Sequence[str]) -> None:
-    rendered: List[str] = []
-    for header, width, align in zip(headers, widths, ALIGNMENTS):
-        formatted = f"{header:{align}{width}}"
-        rendered.append(f"{ANSI_UNDERLINE}{formatted}{ANSI_RESET}")
-    print(" ".join(rendered))
 
 
 def build_rows(
@@ -141,10 +113,18 @@ def main() -> None:
     )
 
     headers = ["Week", "Date", "Day", "Expected", "Actual", "Overtime"]
+    columns = [
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<"),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">"),
+    ]
 
     if not day_summaries:
-        widths = compute_column_widths([], headers)
-        print_header(widths, headers)
+        widths, _ = compute_widths([], headers, columns, None)
+        render_header(headers, widths, columns)
         return
 
     rows, overtime_values = build_rows(day_summaries)
@@ -152,15 +132,53 @@ def main() -> None:
     total_expected = sum(day.expected_minutes for day in day_summaries)
     total_overtime = sum(day.overtime_minutes for day in day_summaries)
     total_row = build_total_row(total_expected, total_actual, total_overtime)
-    widths = compute_column_widths(rows + [total_row], headers)
-    print_header(widths, headers)
-    for row, overtime_minutes in zip(rows, overtime_values):
-        sign = 1 if overtime_minutes > 0 else -1 if overtime_minutes < 0 else 0
-        print(format_row(row, widths, sign))
+    widths, _ = compute_widths(rows + [total_row], headers, columns, None)
+    render_header(headers, widths, columns)
+
+    def overtime_cell_style(
+        row_index: int,
+        col_index: int,
+        _value: str,
+        _row: Sequence[str],
+        line_index: int,
+    ) -> Style | None:
+        if col_index != 5 or line_index != 0:
+            return None
+        minutes = overtime_values[row_index]
+        if minutes < 0:
+            return Style(prefix=ANSI_RED, suffix=ANSI_FG_RESET)
+        if minutes > 0:
+            return Style(prefix=ANSI_GREEN, suffix=ANSI_FG_RESET)
+        return None
+
+    render_rows(rows, widths, columns, cell_style=overtime_cell_style)
 
     print(format_total_overline(widths))
     total_sign = 1 if total_overtime > 0 else -1 if total_overtime < 0 else 0
-    print(format_row(total_row, widths, total_sign))
+    total_style = None
+    if total_sign < 0:
+        total_style = Style(prefix=ANSI_RED, suffix=ANSI_FG_RESET)
+    elif total_sign > 0:
+        total_style = Style(prefix=ANSI_GREEN, suffix=ANSI_FG_RESET)
+
+    def total_cell_style(
+        _row_index: int,
+        col_index: int,
+        _value: str,
+        _row: Sequence[str],
+        line_index: int,
+    ) -> Style | None:
+        if col_index == 5 and line_index == 0:
+            return total_style
+        return None
+
+    render_rows(
+        [total_row],
+        widths,
+        columns,
+        stripe=False,
+        cell_style=total_cell_style,
+    )
 
 
 if __name__ == "__main__":

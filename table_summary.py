@@ -10,13 +10,22 @@ import json
 import sys
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from summary_table_layout import allocate_widths, terminal_width, wrap_text
+from summary_table_printer import (
+    ANSI_FG_RESET,
+    ANSI_RESET,
+    ANSI_UNDERLINE,
+    ColumnSpec,
+    Style,
+    compute_widths,
+    render_header,
+    render_rows,
+    terminal_width,
+    wrap_text,
+)
 
 TIMEW_DATE_FORMAT = "%Y%m%dT%H%M%S%z"
 NOTES_DELIMITER = ";\n"
 
-ANSI_RESET = "\033[0m"
-ANSI_UNDERLINE = "\033[4m"
 ANSI_ROW_ALT = "\033[48;2;26;26;26m"
 ANSI_NO_ANNOTATION = "\033[38;2;238;162;87m"
 ANSI_GAP = "\033[38;2;85;85;85m"
@@ -212,115 +221,6 @@ def split_entries_by_day(
     return split_entries
 
 
-def compute_column_widths(
-    entries: Sequence[TimewEntry], terminal_columns: Optional[int]
-) -> tuple[List[int], bool]:
-    max_week_len = len("Wk")
-    max_tags_len = len("Tags")
-    max_id_len = len("ID")
-    max_annotation_len = len("Annotation")
-    max_start_len = len("Start")
-    max_end_len = len("End")
-    max_time_len = len("Time")
-    max_total_len = len("Total")
-
-    total_day = timedelta()
-    previous_entry: Optional[TimewEntry] = None
-
-    for index, entry in enumerate(entries):
-        next_entry = entries[index + 1] if index + 1 < len(entries) else None
-        is_new_day = should_reset_day(previous_entry, entry)
-        if is_new_day:
-            total_day = timedelta()
-
-        tags_len = len(entry.tags)
-        if tags_len > max_tags_len:
-            max_tags_len = tags_len
-
-        id_len = len(f"@{entry.raw['id']}")
-        if id_len > max_id_len:
-            max_id_len = id_len
-
-        if is_new_day:
-            week_label = f"W{entry.start.isocalendar().week}"
-            if len(week_label) > max_week_len:
-                max_week_len = len(week_label)
-
-        start_local = local_time_string(entry.start)
-        end_local = local_time_string(entry.end) if entry.end else "-"
-        time_spent = str(entry.duration)
-        total_day += entry.duration
-        if len(start_local) > max_start_len:
-            max_start_len = len(start_local)
-        if len(end_local) > max_end_len:
-            max_end_len = len(end_local)
-        if len(time_spent) > max_time_len:
-            max_time_len = len(time_spent)
-        if should_print_total(entry, next_entry):
-            total_label = str(total_day)
-            if len(total_label) > max_total_len:
-                max_total_len = len(total_label)
-
-        annotation_for_width = entry.raw.get("annotation", "")
-        annotation_segments = (
-            str(annotation_for_width).replace(";", "\n").split("\n")
-            if annotation_for_width
-            else [""]
-        )
-        for segment in annotation_segments:
-            segment_len = len(segment.strip())
-            if segment_len > max_annotation_len:
-                max_annotation_len = segment_len
-
-        previous_entry = entry
-
-    widths = [
-        max_week_len,
-        10,
-        3,
-        max_id_len,
-        max_tags_len,
-        max_annotation_len,
-        max_start_len,
-        max_end_len,
-        max_time_len,
-        max_total_len,
-    ]
-    total_width = sum(widths) + (len(widths) - 1)
-    if terminal_columns and total_width > terminal_columns:
-        min_widths = list(widths)
-        tags_limit = max(len("Tags"), terminal_columns // 4)
-        min_widths[4] = min(widths[4], tags_limit)
-        min_widths[5] = len("Annotation")
-        return (
-            allocate_widths(
-                widths,
-                [4, 5],
-                terminal_columns,
-                min_widths,
-                shrink_order=[5, 4],
-            ),
-            True,
-        )
-    return widths, False
-
-
-def build_layout(widths: Sequence[int]) -> str:
-    alignments = ["<", "<", "<", "<", "<", "<", ">", ">", ">", ">"]
-    parts = [f"{{:{align}{width}}}" for align, width in zip(alignments, widths)]
-    return " ".join(parts)
-
-
-def build_header(headers: Sequence[str], widths: Sequence[int]) -> str:
-    alignments = ["<", "<", "<", "<", "<", "<", ">", ">", ">", ">"]
-    parts = [
-        f"{header:{align}{width}}"
-        for header, align, width in zip(headers, alignments, widths)
-    ]
-    underlined_parts = [f"{ANSI_UNDERLINE}{part}{ANSI_RESET}" for part in parts]
-    return " ".join(underlined_parts)
-
-
 def local_time_string(moment: datetime) -> str:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
@@ -340,8 +240,8 @@ def should_print_total(current: TimewEntry, next_entry: Optional[TimewEntry]) ->
 
 
 def next_day_gap(
-    current: TimewEntry, next_entry: Optional[TimewEntry], layout: str
-) -> Optional[str]:
+    current: TimewEntry, next_entry: Optional[TimewEntry]
+) -> Optional[List[str]]:
     if next_entry is None or current.end is None:
         return None
     if next_entry.start.date() > current.start.date():
@@ -352,7 +252,7 @@ def next_day_gap(
     gap_duration = next_entry.start - current.end
     start_local = local_time_string(current.end)
     next_local = local_time_string(next_entry.start)
-    return layout.format(
+    return [
         " ",
         " ",
         " ",
@@ -363,14 +263,24 @@ def next_day_gap(
         next_local,
         str(gap_duration),
         " ",
-    )
+    ]
 
 
-def render_rows(
+def wrap_annotation_segment(value: str, width: int) -> List[str]:
+    if width <= 0:
+        return [value]
+    chunks = wrap_text(value, width)
+    if not chunks:
+        return [""]
+    if width <= 1:
+        return [chunk[:width] for chunk in chunks]
+    return [chunks[0]] + [f"…{chunk[: width - 1]}" for chunk in chunks[1:]]
+
+
+def render_entries(
     entries: Sequence[TimewEntry],
-    layout: str,
     widths: Sequence[int],
-    constrained: bool,
+    columns: Sequence[ColumnSpec],
 ) -> timedelta:
     total_all = timedelta()
     total_day = timedelta()
@@ -396,46 +306,49 @@ def render_rows(
         end_local = local_time_string(entry.end) if entry.end else "-"
         time_spent = str(duration)
         total_label = str(total_day) if should_print_total(entry, next_entry) else " "
+        annotation_lines = entry.annotation_lines or ["-"]
+        annotation_cell = "\n".join(annotation_lines)
 
-        if constrained:
-            annotation_lines = wrap_annotation_lines(entry.annotation_lines, widths[5])
-            tag_lines = wrap_text(entry.tags, widths[4])
-        else:
-            annotation_lines = entry.annotation_lines
-            tag_lines = [entry.tags]
-        max_lines = max(len(annotation_lines), len(tag_lines))
-        if max_lines == 0:
-            annotation_lines = ["-"]
-            tag_lines = [""]
-            max_lines = 1
+        row = [
+            week_label,
+            date_label,
+            day_label,
+            entry_id,
+            entry.tags,
+            annotation_cell,
+            start_local,
+            end_local,
+            time_spent,
+            total_label,
+        ]
 
-        is_missing_annotation = annotation_lines and annotation_lines[0] == "-"
-        row_color_prefix = ANSI_NO_ANNOTATION if is_missing_annotation else ""
-        background_prefix = ANSI_ROW_ALT if index % 2 else ""
-        color_prefix = f"{row_color_prefix}{background_prefix}"
+        def row_highlight(
+            _row_index: int, row_values: Sequence[str], _line_index: int
+        ) -> Style | None:
+            first_annotation = row_values[5].split("\n", 1)[0].strip()
+            if first_annotation == "-":
+                return Style(prefix=ANSI_NO_ANNOTATION, suffix=ANSI_FG_RESET)
+            return None
 
-        for line_index in range(max_lines):
-            tags_line = tag_lines[line_index] if line_index < len(tag_lines) else ""
-            annotation_line = (
-                annotation_lines[line_index]
-                if line_index < len(annotation_lines)
-                else ""
-            )
-            if line_index == 0:
-                print(
-                    f"{color_prefix}{layout.format(week_label, date_label, day_label, entry_id, tags_line, annotation_line, start_local, end_local, time_spent, total_label)}"
-                    f"{ANSI_RESET if (color_prefix or is_missing_annotation) else ''}"
-                )
-            else:
-                prefix = ANSI_ROW_ALT if index % 2 else ""
-                suffix = ANSI_RESET if prefix else ""
-                print(
-                    f"{prefix}{layout.format(' ', ' ', ' ', ' ', tags_line, annotation_line, ' ', ' ', ' ', ' ')}{suffix}"
-                )
+        render_rows(
+            [row],
+            widths,
+            columns,
+            stripe=True,
+            stripe_color=ANSI_ROW_ALT,
+            row_style=row_highlight,
+            start_index=index,
+        )
 
-        gap_row = next_day_gap(entry, next_entry, layout)
+        gap_row = next_day_gap(entry, next_entry)
         if gap_row:
-            print(f"{ANSI_GAP}{gap_row}{ANSI_RESET}")
+            render_rows(
+                [gap_row],
+                widths,
+                columns,
+                stripe=False,
+                row_style=lambda _i, _r, _l: Style(prefix=ANSI_GAP),
+            )
 
         previous_entry = entry
 
@@ -460,23 +373,6 @@ def format_timedelta(value: timedelta) -> str:
     return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
-def wrap_annotation_lines(lines: Sequence[str], width: int) -> List[str]:
-    if width <= 0:
-        return list(lines)
-    wrapped: List[str] = []
-    for line in lines:
-        chunks = wrap_text(line, width)
-        if not chunks:
-            wrapped.append("")
-            continue
-        wrapped.append(chunks[0])
-        if width <= 1:
-            wrapped.extend(chunk[:width] for chunk in chunks[1:])
-        else:
-            wrapped.extend(f"…{chunk[: width - 1]}" for chunk in chunks[1:])
-    return wrapped
-
-
 if __name__ == "__main__":
     config = read_configuration(sys.stdin)
     raw_entries = read_entries(sys.stdin)
@@ -484,27 +380,85 @@ if __name__ == "__main__":
     range_start, range_end = resolve_report_range(config)
     parsed_entries = split_entries_by_day(parsed_entries, range_start, range_end)
     terminal_columns = terminal_width(sys.stdout)
-    widths, constrained = compute_column_widths(parsed_entries, terminal_columns)
-    layout = build_layout(widths)
+    headers = [
+        "Wk",
+        "Date",
+        "Day",
+        "ID",
+        "Tags",
+        "Annotation",
+        "Start",
+        "End",
+        "Time",
+        "Total",
+    ]
+    columns = [
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<", wrap=True, elastic=False),
+        ColumnSpec(
+            align="<",
+            wrap=True,
+            elastic=True,
+            min_width=len("Annotation"),
+            wrap_fn=wrap_annotation_segment,
+        ),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">", min_width=len("Total")),
+    ]
 
-    header = build_header(
-        [
-            "Wk",
-            "Date",
-            "Day",
-            "ID",
-            "Tags",
-            "Annotation",
-            "Start",
-            "End",
-            "Time",
-            "Total",
-        ],
-        widths,
+    rows_for_widths: List[List[str]] = []
+    total_day = timedelta()
+    previous_entry: Optional[TimewEntry] = None
+    for index, entry in enumerate(parsed_entries):
+        next_entry = (
+            parsed_entries[index + 1] if index + 1 < len(parsed_entries) else None
+        )
+        is_new_day = should_reset_day(previous_entry, entry)
+        if is_new_day:
+            total_day = timedelta()
+        duration = entry.duration
+        total_day += duration
+        week_label = f"W{entry.start.isocalendar().week}" if is_new_day else ""
+        date_label = entry.start.strftime("%Y-%m-%d") if is_new_day else ""
+        day_label = entry.start.strftime("%a") if is_new_day else ""
+        entry_id = f"@{entry.raw['id']}"
+        start_local = local_time_string(entry.start)
+        end_local = local_time_string(entry.end) if entry.end else "-"
+        time_spent = str(duration)
+        total_label = str(total_day) if should_print_total(entry, next_entry) else " "
+        annotation_lines = entry.annotation_lines or ["-"]
+        annotation_cell = "\n".join(annotation_lines)
+        rows_for_widths.append(
+            [
+                week_label,
+                date_label,
+                day_label,
+                entry_id,
+                entry.tags,
+                annotation_cell,
+                start_local,
+                end_local,
+                time_spent,
+                total_label,
+            ]
+        )
+        previous_entry = entry
+
+    widths, _ = compute_widths(
+        rows_for_widths,
+        headers,
+        columns,
+        terminal_columns,
+        shrink_order=[5, 4],
     )
-    print(header)
+    render_header(headers, widths, columns)
 
-    total_duration = render_rows(parsed_entries, layout, widths, constrained)
+    total_duration = render_entries(parsed_entries, widths, columns)
 
     for line in format_total_line(total_duration, widths):
         print(line)

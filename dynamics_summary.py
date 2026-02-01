@@ -6,9 +6,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import sys
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
-from summary_table_layout import allocate_widths, terminal_width, wrap_text
+from summary_table_printer import (
+    ANSI_FG_RESET,
+    ANSI_RESET,
+    ANSI_UNDERLINE,
+    ColumnSpec,
+    Style,
+    render_table,
+    terminal_width,
+)
 
 from dynamics_common import (
     DynamicsRecord,
@@ -20,9 +28,6 @@ from dynamics_common import (
     split_report_input,
 )
 
-ANSI_RESET = "\033[0m"
-ANSI_UNDERLINE = "\033[4m"
-ANSI_ROW_ALT = "\033[48;2;26;26;26m"
 ANSI_NO_DESCRIPTION = "\033[38;2;238;162;87m"
 
 
@@ -46,9 +51,8 @@ class DynamicsRow:
 
 def build_table_rows(
     entries: Sequence[DynamicsRow],
-) -> Tuple[List[List[str]], int, List[int]]:
+) -> Tuple[List[List[str]], int]:
     rows: List[List[str]] = []
-    master_flags: List[int] = []
     total_minutes = 0
 
     for row in entries:
@@ -58,130 +62,27 @@ def build_table_rows(
             row.annotation_delimiter,
             row.output_separator,
         )
-        description_lines = description_display.split(row.output_separator)
+        if row.output_separator:
+            description_lines = description_display.split(row.output_separator)
+        else:
+            description_lines = [description_display]
         external_lines = (
             row.external_comment.split("\n") if row.external_comment else [""]
         )
-        max_lines = max(len(description_lines), len(external_lines))
-
-        description_lines.extend(
-            ["" for _ in range(max_lines - len(description_lines))]
+        rows.append(
+            [
+                row.date,
+                row.project,
+                row.project_task,
+                row.role,
+                row.type,
+                "\n".join(description_lines),
+                "\n".join(external_lines),
+                row.formatted_duration(),
+            ]
         )
-        external_lines.extend(["" for _ in range(max_lines - len(external_lines))])
 
-        for index, (desc, ext) in enumerate(zip(description_lines, external_lines)):
-            rows.append(
-                [
-                    row.date if index == 0 else "",
-                    row.project if index == 0 else "",
-                    row.project_task if index == 0 else "",
-                    row.role if index == 0 else "",
-                    row.type if index == 0 else "",
-                    desc,
-                    ext,
-                    row.formatted_duration() if index == 0 else "",
-                ]
-            )
-            master_flags.append(1 if index == 0 else 0)
-
-    return rows, total_minutes, master_flags
-
-
-def compute_column_widths(
-    rows: Sequence[Sequence[str]],
-    headers: Sequence[str],
-    terminal_columns: Optional[int],
-) -> tuple[List[int], bool]:
-    widths = [len(header) for header in headers]
-    max_word_lengths = [len(header) for header in headers]
-    for row in rows:
-        for index, cell in enumerate(row):
-            widths[index] = max(widths[index], len(cell))
-            if cell:
-                max_word_lengths[index] = max(
-                    max_word_lengths[index],
-                    max(
-                        (len(word) for word in cell.split()),
-                        default=max_word_lengths[index],
-                    ),
-                )
-    total_width = sum(widths) + (len(widths) - 1)
-    if terminal_columns and total_width > terminal_columns:
-        min_widths = list(widths)
-        for index in (1, 2, 5, 6):
-            min_widths[index] = max(len(headers[index]), max_word_lengths[index])
-        return (
-            allocate_widths(
-                widths,
-                [1, 2, 5, 6],
-                terminal_columns,
-                min_widths,
-                shrink_order=[5, 6, 1, 2],
-            ),
-            True,
-        )
-    return widths, False
-
-
-def build_layout(widths: Sequence[int]) -> str:
-    alignments = ["<", "<", "<", "<", "<", "<", "<", ">"]
-    parts = [f"{{:{align}{width}}}" for align, width in zip(alignments, widths)]
-    return " ".join(parts)
-
-
-def print_header(headers: Sequence[str], widths: Sequence[int]) -> None:
-    alignments = ["<", "<", "<", "<", "<", "<", "<", ">"]
-    parts = [
-        f"{header:{align}{width}}"
-        for header, align, width in zip(headers, alignments, widths)
-    ]
-    underlined = [f"{ANSI_UNDERLINE}{part}{ANSI_RESET}" for part in parts]
-    print(" ".join(underlined))
-
-
-def print_rows(
-    layout: str,
-    rows: Sequence[Sequence[str]],
-    master_flags: Sequence[int],
-    widths: Sequence[int],
-    constrained: bool,
-) -> None:
-    master_index = -1
-    for index, row in enumerate(rows):
-        if master_flags[index]:
-            master_index += 1
-        if constrained:
-            wrapped_columns = {
-                column_index: wrap_text(row[column_index], widths[column_index])
-                for column_index in (1, 2, 5, 6)
-            }
-            max_lines = max(
-                (len(lines) for lines in wrapped_columns.values()), default=1
-            )
-        else:
-            wrapped_columns = {}
-            max_lines = 1
-        color_prefix = ANSI_ROW_ALT if master_index % 2 else ""
-        color_suffix = ANSI_RESET if color_prefix else ""
-        description_is_empty = row[5] == ""
-        primary_line = row[7] != ""
-        highlight = ANSI_NO_DESCRIPTION if description_is_empty and primary_line else ""
-        reset = ANSI_RESET if highlight else ""
-
-        for line_index in range(max_lines):
-            if line_index == 0:
-                output_row = list(row)
-            else:
-                output_row = ["" for _ in row]
-            if constrained:
-                for column_index, lines in wrapped_columns.items():
-                    output_row[column_index] = (
-                        lines[line_index] if line_index < len(lines) else ""
-                    )
-            if highlight:
-                print(f"{highlight}{layout.format(*output_row)}{reset}")
-            else:
-                print(f"{color_prefix}{layout.format(*output_row)}{color_suffix}")
+    return rows, total_minutes
 
 
 def print_total(widths: Sequence[int], total_minutes: int) -> None:
@@ -245,13 +146,38 @@ def main() -> None:
         "Duration",
     ]
 
-    table_rows, total_minutes, master_flags = build_table_rows(dynamics_rows)
-    terminal_columns = terminal_width(sys.stdout)
-    widths, constrained = compute_column_widths(table_rows, headers, terminal_columns)
-    layout = build_layout(widths)
+    table_rows, total_minutes = build_table_rows(dynamics_rows)
+    columns = [
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<", wrap=True, elastic=True),
+        ColumnSpec(align="<", wrap=True, elastic=True),
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<"),
+        ColumnSpec(align="<", wrap=True, elastic=True),
+        ColumnSpec(align="<", wrap=True, elastic=True),
+        ColumnSpec(align=">"),
+    ]
 
-    print_header(headers, widths)
-    print_rows(layout, table_rows, master_flags, widths, constrained)
+    def row_highlight(
+        _row_index: int, row: Sequence[str], line_index: int
+    ) -> Style | None:
+        if line_index != 0:
+            return None
+        description_is_empty = row[5] == ""
+        primary_line = row[7] != ""
+        if description_is_empty and primary_line:
+            return Style(prefix=ANSI_NO_DESCRIPTION, suffix=ANSI_FG_RESET)
+        return None
+
+    terminal_columns = terminal_width(sys.stdout)
+    widths, _ = render_table(
+        headers,
+        table_rows,
+        columns,
+        terminal_columns=terminal_columns,
+        shrink_order=[5, 6, 1, 2],
+        row_style=row_highlight,
+    )
     print_total(widths, total_minutes)
 
 
