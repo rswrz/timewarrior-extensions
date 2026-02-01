@@ -311,8 +311,12 @@ def build_layout(widths: Sequence[int]) -> str:
     return " ".join(parts)
 
 
-def build_header(layout: str) -> str:
-    parts = layout.split(" ")
+def build_header(headers: Sequence[str], widths: Sequence[int]) -> str:
+    alignments = ["<", "<", "<", "<", "<", "<", ">", ">", ">", ">"]
+    parts = [
+        f"{header:{align}{width}}"
+        for header, align, width in zip(headers, alignments, widths)
+    ]
     underlined_parts = [f"{ANSI_UNDERLINE}{part}{ANSI_RESET}" for part in parts]
     return " ".join(underlined_parts)
 
@@ -483,9 +487,8 @@ if __name__ == "__main__":
     widths, constrained = compute_column_widths(parsed_entries, terminal_columns)
     layout = build_layout(widths)
 
-    header = build_header(layout)
-    print(
-        header.format(
+    header = build_header(
+        [
             "Wk",
             "Date",
             "Day",
@@ -496,8 +499,10 @@ if __name__ == "__main__":
             "End",
             "Time",
             "Total",
-        )
+        ],
+        widths,
     )
+    print(header)
 
     total_duration = render_rows(parsed_entries, layout, widths, constrained)
 

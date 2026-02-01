@@ -93,15 +93,33 @@ def compute_column_widths(
     terminal_columns: Optional[int],
 ) -> tuple[List[int], bool]:
     widths = [len(header) for header in headers]
+    max_word_lengths = [len(header) for header in headers]
     for row in rows:
         for index, cell in enumerate(row):
             widths[index] = max(widths[index], len(cell))
+            if cell:
+                max_word_lengths[index] = max(
+                    max_word_lengths[index],
+                    max(
+                        (len(word) for word in cell.split()),
+                        default=max_word_lengths[index],
+                    ),
+                )
     total_width = sum(widths) + (len(widths) - 1)
     if terminal_columns and total_width > terminal_columns:
         min_widths = list(widths)
         for index in (1, 2, 5, 6):
-            min_widths[index] = len(headers[index])
-        return allocate_widths(widths, [1, 2, 5, 6], terminal_columns, min_widths), True
+            min_widths[index] = max(len(headers[index]), max_word_lengths[index])
+        return (
+            allocate_widths(
+                widths,
+                [1, 2, 5, 6],
+                terminal_columns,
+                min_widths,
+                shrink_order=[5, 6, 1, 2],
+            ),
+            True,
+        )
     return widths, False
 
 
@@ -111,10 +129,13 @@ def build_layout(widths: Sequence[int]) -> str:
     return " ".join(parts)
 
 
-def print_header(layout: str, headers: Sequence[str]) -> None:
-    formatted = layout.format(*headers)
-    columns = formatted.split(" ")
-    underlined = [f"{ANSI_UNDERLINE}{column}{ANSI_RESET}" for column in columns]
+def print_header(headers: Sequence[str], widths: Sequence[int]) -> None:
+    alignments = ["<", "<", "<", "<", "<", "<", "<", ">"]
+    parts = [
+        f"{header:{align}{width}}"
+        for header, align, width in zip(headers, alignments, widths)
+    ]
+    underlined = [f"{ANSI_UNDERLINE}{part}{ANSI_RESET}" for part in parts]
     print(" ".join(underlined))
 
 
@@ -229,7 +250,7 @@ def main() -> None:
     widths, constrained = compute_column_widths(table_rows, headers, terminal_columns)
     layout = build_layout(widths)
 
-    print_header(layout, headers)
+    print_header(headers, widths)
     print_rows(layout, table_rows, master_flags, widths, constrained)
     print_total(widths, total_minutes)
 
