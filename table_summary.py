@@ -215,11 +215,24 @@ def split_entries_by_day(
 def compute_column_widths(
     entries: Sequence[TimewEntry], terminal_columns: Optional[int]
 ) -> tuple[List[int], bool]:
+    max_week_len = len("Wk")
     max_tags_len = len("Tags")
     max_id_len = len("ID")
     max_annotation_len = len("Annotation")
+    max_start_len = len("Start")
+    max_end_len = len("End")
+    max_time_len = len("Time")
+    max_total_len = len("Total")
 
-    for entry in entries:
+    total_day = timedelta()
+    previous_entry: Optional[TimewEntry] = None
+
+    for index, entry in enumerate(entries):
+        next_entry = entries[index + 1] if index + 1 < len(entries) else None
+        is_new_day = should_reset_day(previous_entry, entry)
+        if is_new_day:
+            total_day = timedelta()
+
         tags_len = len(entry.tags)
         if tags_len > max_tags_len:
             max_tags_len = tags_len
@@ -227,6 +240,26 @@ def compute_column_widths(
         id_len = len(f"@{entry.raw['id']}")
         if id_len > max_id_len:
             max_id_len = id_len
+
+        if is_new_day:
+            week_label = f"W{entry.start.isocalendar().week}"
+            if len(week_label) > max_week_len:
+                max_week_len = len(week_label)
+
+        start_local = local_time_string(entry.start)
+        end_local = local_time_string(entry.end) if entry.end else "-"
+        time_spent = str(entry.duration)
+        total_day += entry.duration
+        if len(start_local) > max_start_len:
+            max_start_len = len(start_local)
+        if len(end_local) > max_end_len:
+            max_end_len = len(end_local)
+        if len(time_spent) > max_time_len:
+            max_time_len = len(time_spent)
+        if should_print_total(entry, next_entry):
+            total_label = str(total_day)
+            if len(total_label) > max_total_len:
+                max_total_len = len(total_label)
 
         annotation_for_width = entry.raw.get("annotation", "")
         annotation_segments = (
@@ -239,7 +272,20 @@ def compute_column_widths(
             if segment_len > max_annotation_len:
                 max_annotation_len = segment_len
 
-    widths = [3, 10, 3, max_id_len, max_tags_len, max_annotation_len, 8, 8, 8, 8]
+        previous_entry = entry
+
+    widths = [
+        max_week_len,
+        10,
+        3,
+        max_id_len,
+        max_tags_len,
+        max_annotation_len,
+        max_start_len,
+        max_end_len,
+        max_time_len,
+        max_total_len,
+    ]
     total_width = sum(widths) + (len(widths) - 1)
     if terminal_columns and total_width > terminal_columns:
         min_widths = list(widths)
