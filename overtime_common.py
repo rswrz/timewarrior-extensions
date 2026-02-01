@@ -299,14 +299,14 @@ def build_overtime_summaries(
         expected = expected_minutes_per_day if is_work_day else 0
         overtime = actual - expected
 
-        key = (current.isocalendar().year, current.isocalendar().week)
+        key = current.isocalendar().week
         if actual == 0 and expected == 0:
             continue
 
         day_summaries.append(
             DaySummary(
                 moment=current,
-                week_label=f"{key[0]}-W{key[1]:02d}",
+                week_label=f"W{key}",
                 weekday_label=current.strftime("%a"),
                 actual_minutes=actual,
                 expected_minutes=expected,

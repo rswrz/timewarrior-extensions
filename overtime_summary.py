@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import sys
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from summary_table_printer import (
     ANSI_FG_RESET,
@@ -45,15 +45,23 @@ def format_overtime_minutes(minutes: int) -> str:
 
 def build_rows(
     days: Sequence[DaySummary],
-) -> Tuple[List[List[str]], List[int]]:
+) -> Tuple[List[List[str]], List[int], List[Optional[int]]]:
     rows: List[List[str]] = []
     overtime_values: List[int] = []
+    weekly_total_values: List[Optional[int]] = []
     last_week = None
+    week_total = 0
 
-    for day in days:
+    for index, day in enumerate(days):
         week_cell = (
             day.week_label if last_week is None or day.week_label != last_week else ""
         )
+        if last_week is None or day.week_label != last_week:
+            week_total = 0
+        week_total += day.overtime_minutes
+        next_day = days[index + 1] if index + 1 < len(days) else None
+        is_week_end = next_day is None or next_day.week_label != day.week_label
+        weekly_total = week_total if is_week_end else None
         rows.append(
             [
                 week_cell,
@@ -62,12 +70,14 @@ def build_rows(
                 format_minutes(day.expected_minutes),
                 format_minutes(day.actual_minutes),
                 format_overtime_minutes(day.overtime_minutes),
+                format_overtime_minutes(weekly_total) if weekly_total is not None else "",
             ]
         )
         overtime_values.append(day.overtime_minutes)
+        weekly_total_values.append(weekly_total)
         last_week = day.week_label
 
-    return rows, overtime_values
+    return rows, overtime_values, weekly_total_values
 
 
 def build_total_row(
@@ -79,15 +89,16 @@ def build_total_row(
         "",
         format_minutes(total_expected),
         format_minutes(total_actual),
+        "",
         format_overtime_minutes(total_overtime),
     ]
 
 
-def format_total_overline(widths: Sequence[int]) -> str:
+def format_total_overline(widths: Sequence[int], total_row: Sequence[str]) -> str:
     rendered: List[str] = []
     for index, width in enumerate(widths):
         spaces = " " * width
-        if index >= 3:
+        if total_row[index]:
             rendered.append(f"{ANSI_UNDERLINE}{spaces}{ANSI_RESET}")
         else:
             rendered.append(spaces)
@@ -112,11 +123,12 @@ def main() -> None:
         end_date=end_date,
     )
 
-    headers = ["Week", "Date", "Day", "Expected", "Actual", "Overtime"]
+    headers = ["Wk", "Date", "Day", "Expected", "Actual", "Overtime", "Total"]
     columns = [
         ColumnSpec(align="<"),
         ColumnSpec(align="<"),
         ColumnSpec(align="<"),
+        ColumnSpec(align=">"),
         ColumnSpec(align=">"),
         ColumnSpec(align=">"),
         ColumnSpec(align=">"),
@@ -127,7 +139,7 @@ def main() -> None:
         render_header(headers, widths, columns)
         return
 
-    rows, overtime_values = build_rows(day_summaries)
+    rows, overtime_values, weekly_total_values = build_rows(day_summaries)
     total_actual = sum(day.actual_minutes for day in day_summaries)
     total_expected = sum(day.expected_minutes for day in day_summaries)
     total_overtime = sum(day.overtime_minutes for day in day_summaries)
@@ -142,9 +154,15 @@ def main() -> None:
         _row: Sequence[str],
         line_index: int,
     ) -> Style | None:
-        if col_index != 5 or line_index != 0:
+        if line_index != 0:
             return None
-        minutes = overtime_values[row_index]
+        minutes: Optional[int] = None
+        if col_index == 5:
+            minutes = overtime_values[row_index]
+        elif col_index == 6:
+            minutes = weekly_total_values[row_index]
+        if minutes is None:
+            return None
         if minutes < 0:
             return Style(prefix=ANSI_RED, suffix=ANSI_FG_RESET)
         if minutes > 0:
@@ -153,7 +171,7 @@ def main() -> None:
 
     render_rows(rows, widths, columns, cell_style=overtime_cell_style)
 
-    print(format_total_overline(widths))
+    print(format_total_overline(widths, total_row))
     total_sign = 1 if total_overtime > 0 else -1 if total_overtime < 0 else 0
     total_style = None
     if total_sign < 0:
@@ -168,7 +186,7 @@ def main() -> None:
         _row: Sequence[str],
         line_index: int,
     ) -> Style | None:
-        if col_index == 5 and line_index == 0:
+        if col_index == 6 and line_index == 0:
             return total_style
         return None
 
