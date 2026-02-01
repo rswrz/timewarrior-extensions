@@ -95,22 +95,31 @@ def build_rows(
         overtime_values.append(day.overtime_minutes)
         last_week = day.week_label
 
-    total_actual = sum(day.actual_minutes for day in days)
-    total_expected = sum(day.expected_minutes for day in days)
-    total_overtime = sum(day.overtime_minutes for day in days)
-    rows.append(
-        [
-            "",
-            "",
-            "Total",
-            format_minutes(total_expected),
-            format_minutes(total_actual),
-            format_overtime_minutes(total_overtime),
-        ]
-    )
-    overtime_values.append(total_overtime)
-
     return rows, overtime_values
+
+
+def build_total_row(
+    total_expected: int, total_actual: int, total_overtime: int
+) -> List[str]:
+    return [
+        "",
+        "",
+        "",
+        format_minutes(total_expected),
+        format_minutes(total_actual),
+        format_overtime_minutes(total_overtime),
+    ]
+
+
+def format_total_overline(widths: Sequence[int]) -> str:
+    rendered: List[str] = []
+    for index, width in enumerate(widths):
+        spaces = " " * width
+        if index >= 3:
+            rendered.append(f"{ANSI_UNDERLINE}{spaces}{ANSI_RESET}")
+        else:
+            rendered.append(spaces)
+    return " ".join(rendered)
 
 
 def main() -> None:
@@ -139,11 +148,19 @@ def main() -> None:
         return
 
     rows, overtime_values = build_rows(day_summaries)
-    widths = compute_column_widths(rows, headers)
+    total_actual = sum(day.actual_minutes for day in day_summaries)
+    total_expected = sum(day.expected_minutes for day in day_summaries)
+    total_overtime = sum(day.overtime_minutes for day in day_summaries)
+    total_row = build_total_row(total_expected, total_actual, total_overtime)
+    widths = compute_column_widths(rows + [total_row], headers)
     print_header(widths, headers)
     for row, overtime_minutes in zip(rows, overtime_values):
         sign = 1 if overtime_minutes > 0 else -1 if overtime_minutes < 0 else 0
         print(format_row(row, widths, sign))
+
+    print(format_total_overline(widths))
+    total_sign = 1 if total_overtime > 0 else -1 if total_overtime < 0 else 0
+    print(format_row(total_row, widths, total_sign))
 
 
 if __name__ == "__main__":
