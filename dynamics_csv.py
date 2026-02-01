@@ -439,15 +439,50 @@ def load_project_configuration() -> List[dict]:
         return json.load(config_file)
 
 
-def parse_timew_export(stream: Iterable[str]) -> List[dict]:
+def split_report_input(stream: Iterable[str]) -> Tuple[Dict[str, str], str]:
+    """Split Timewarrior report header from JSON payload."""
+
+    content = "".join(stream)
+    if "\n\n" not in content:
+        return {}, content
+
+    header_text, payload = content.split("\n\n", 1)
+    if not header_text.strip() or header_text.lstrip().startswith("["):
+        return {}, content
+
+    header_lines = header_text.splitlines()
+    if not any(": " in line for line in header_lines):
+        return {}, content
+
+    config: Dict[str, str] = {}
+    for line in header_lines:
+        if not line.strip():
+            continue
+        key, _, remainder = line.partition(": ")
+        if not key:
+            continue
+        config[key.strip()] = remainder.rstrip("\n")
+
+    return config, payload
+
+
+def parse_timew_export(payload: str) -> List[dict]:
     """Parse the JSON payload produced by `timew export`."""
 
-    for line in stream:
-        if line == "\n":
-            break
-
-    payload = "".join(stream)
     return json.loads(payload) if payload else []
+
+
+def parse_exclude_tags(config: Dict[str, str]) -> set[str]:
+    raw = config.get("reports.dynamics.exclude_tags", "")
+    if not raw:
+        return set()
+    return {tag.strip() for tag in raw.split(",") if tag.strip()}
+
+
+def has_excluded_tags(tags: Sequence[str], excluded_tags: set[str]) -> bool:
+    if not excluded_tags or not tags:
+        return False
+    return any(tag in excluded_tags for tag in tags)
 
 
 def resolve_project_config(
@@ -691,9 +726,11 @@ def write_output(entries: Sequence[DynamicsEntry]) -> None:
 
 def main() -> None:
     project_configs = load_project_configuration()
-    timew_entries = parse_timew_export(sys.stdin)
+    report_config, payload = split_report_input(sys.stdin)
+    timew_entries = parse_timew_export(payload)
     annotation_delimiter_override = os.getenv(ANNOTATION_DELIMITER_ENV_VAR)
     output_separator_override = os.getenv(OUTPUT_SEPARATOR_ENV_VAR)
+    excluded_tags = parse_exclude_tags(report_config)
 
     dynamics_entries: List[DynamicsEntry] = []
     for timew_entry in timew_entries:
@@ -701,6 +738,8 @@ def main() -> None:
             continue
 
         tags = timew_entry.get("tags", [])
+        if has_excluded_tags(tags, excluded_tags):
+            continue
         project_config = resolve_project_config(tags, project_configs)
         entry, merge_on_equal_tags = build_dynamics_entry(
             timew_entry,

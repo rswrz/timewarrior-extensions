@@ -49,15 +49,46 @@ class DynamicsRow:
         return f"{hours}:{minutes:02d}"
 
 
-def skip_report_header(stream: Iterable[str]) -> None:
-    for line in stream:
-        if line == "\n":
-            break
+def split_report_input(stream: Iterable[str]) -> Tuple[Dict[str, str], str]:
+    content = "".join(stream)
+    if "\n\n" not in content:
+        return {}, content
+
+    header_text, payload = content.split("\n\n", 1)
+    if not header_text.strip() or header_text.lstrip().startswith("["):
+        return {}, content
+
+    header_lines = header_text.splitlines()
+    if not any(": " in line for line in header_lines):
+        return {}, content
+
+    config: Dict[str, str] = {}
+    for line in header_lines:
+        if not line.strip():
+            continue
+        key, _, remainder = line.partition(": ")
+        if not key:
+            continue
+        config[key.strip()] = remainder.rstrip("\n")
+
+    return config, payload
 
 
-def parse_timew_export(stream: Iterable[str]) -> List[dict]:
-    payload = "".join(stream)
+def parse_timew_export(payload: str) -> List[dict]:
     return json.loads(payload) if payload else []
+
+
+def parse_exclude_tags(config: Dict[str, str]) -> set[str]:
+    raw = config.get("reports.dynamics.exclude_tags", "")
+    if not raw:
+        return set()
+    return {tag.strip() for tag in raw.split(",") if tag.strip()}
+
+
+def has_excluded_tags(tags: Sequence[str], excluded_tags: set[str]) -> bool:
+    if not excluded_tags or not tags:
+        return False
+    return any(tag in excluded_tags for tag in tags)
 
 
 def calculate_working_time(
@@ -343,8 +374,9 @@ def format_total_duration(total_minutes: int) -> str:
 
 
 def main() -> None:
-    skip_report_header(sys.stdin)
-    timew_entries = parse_timew_export(sys.stdin)
+    report_config, payload = split_report_input(sys.stdin)
+    timew_entries = parse_timew_export(payload)
+    excluded_tags = parse_exclude_tags(report_config)
 
     config_filename = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_FILENAME)
     project_configs = load_project_configuration(config_filename)
@@ -354,7 +386,10 @@ def main() -> None:
 
     dynamics_rows: List[DynamicsRow] = []
     for entry in timew_entries:
-        project_config = resolve_project_config(entry.get("tags", []), project_configs)
+        tags = entry.get("tags", [])
+        if has_excluded_tags(tags, excluded_tags):
+            continue
+        project_config = resolve_project_config(tags, project_configs)
         row, merge_on_equal_tags = build_dynamics_row(
             entry,
             project_config,

@@ -57,6 +57,18 @@ You can change both the input delimiter and the output separator globally via en
 - Default location: `.dynamics_config.json` (alongside the script)
 - Override via env var: `TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON`
 
+### Timewarrior report configuration
+
+- `reports.dynamics.exclude_tags`: comma-separated list of tags to drop from the Dynamics output.
+
+Example:
+
+```
+reports.dynamics.exclude_tags = vacation, sick, holiday
+```
+
+Any entry containing one of the excluded tags is skipped entirely. This setting is read from the Timewarrior report header, so it applies when using `timew report dynamics_csv`.
+
 Each mapping object may include:
 
 - `timew_tags` (array, required): tag set to match.

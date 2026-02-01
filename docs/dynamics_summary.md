@@ -39,6 +39,18 @@ Supported environment variables mirror the CSV exporter:
 - `TIMEWARRIOR_EXT_DYNAMICS_ANNOTATION_DELIMITER`
 - `TIMEWARRIOR_EXT_DYNAMICS_OUTPUT_SEPARATOR`
 
+### Timewarrior report configuration
+
+- `reports.dynamics.exclude_tags`: comma-separated list of tags to drop from the Dynamics output.
+
+Example:
+
+```
+reports.dynamics.exclude_tags = vacation, sick, holiday
+```
+
+Any entry containing one of the excluded tags is skipped entirely. This setting is read from the Timewarrior report header, so it applies when using `timew report dynamics_summary`.
+
 ## Merging & Rounding
 
 Entries are rounded to 15-minute blocks (configurable per project with `multiplier`). Records on the same day with matching project/task/role/type are merged using the same logic as the Dynamics CSV report, preventing duplicates in the table.
