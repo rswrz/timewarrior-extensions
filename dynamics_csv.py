@@ -531,12 +531,9 @@ def build_dynamics_entry(
     if output_separator is None or output_separator == "":
         output_separator = DEFAULT_OUTPUT_SEPARATOR
 
-    if "description_prefix" in project_config:
-        description = (
-            project_config["description_prefix"] + annotation_delimiter + annotation
-        )
-    else:
-        description = annotation
+    description = annotation_delimiter.join(
+        filter(None, [project_config.get("description_prefix", ""), annotation])
+    )
 
     external_comment = project_config.get("external_comment", "")
     merge_on_equal_tags = (
