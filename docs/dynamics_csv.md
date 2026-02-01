@@ -54,18 +54,37 @@ You can change both the input delimiter and the output separator globally via en
 
 ## Configuration
 
-- Default location: `.dynamics_config.json` (alongside the script)
-- Override via env var: `TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON`
+Configuration is resolved in this order (later overrides earlier):
+
+1. Built-in defaults
+2. Timewarrior report header (`reports.dynamics.*`)
+3. Environment variables (`TIMEWARRIOR_REPORTS_DYNAMICS_*`)
 
 ### Timewarrior report configuration
-
-- `reports.dynamics.exclude_tags`: comma-separated list of tags to drop from the Dynamics output.
 
 Example:
 
 ```
+reports.dynamics.config_file = ~/.config/timew/dynamics.json
+reports.dynamics.annotation_delimiter = ; 
+reports.dynamics.annotation_output_separator = ;\n
 reports.dynamics.exclude_tags = vacation, sick, holiday
+reports.dynamics.llm.enabled = true
+reports.dynamics.llm.provider = openai
+reports.dynamics.llm.model = gpt-4o-mini
+reports.dynamics.llm.endpoint = https://api.openai.com/v1/chat/completions
+reports.dynamics.llm.temperature = 0.2
+reports.dynamics.llm.timeout = 2.0
+reports.dynamics.llm.openai_api_key = $OPENAI_API_KEY
 ```
+
+Supported keys:
+
+- `reports.dynamics.config_file`: path to the Dynamics config JSON.
+- `reports.dynamics.annotation_delimiter`: delimiter for annotation segments (default `; `).
+- `reports.dynamics.annotation_output_separator`: joiner for visible segments in CSV (default `;\n`).
+- `reports.dynamics.exclude_tags`: comma-separated list of tags to skip.
+- `reports.dynamics.llm.*`: LLM settings (see LLM section below).
 
 Any entry containing one of the excluded tags is skipped entirely. This setting is read from the Timewarrior report header, so it applies when using `timew report dynamics_csv`.
 
@@ -119,19 +138,22 @@ Example:
 
 ## Environment Variables
 
-- Config path
-  - `TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON`: path to config JSON
-- Formatting
-  - `TIMEWARRIOR_EXT_DYNAMICS_ANNOTATION_DELIMITER`: override input delimiter
-  - `TIMEWARRIOR_EXT_DYNAMICS_OUTPUT_SEPARATOR`: override output joiner
-- Optional LLM refinement
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_ENABLED` (true/false; default off)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_PROVIDER` (`ollama` default, or `openai`)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_ENDPOINT` (default `http://127.0.0.1:11434/api/generate` for Ollama, `https://api.openai.com/v1/chat/completions` for OpenAI)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_MODEL` (default `llama3` for Ollama; set e.g. `gpt-4o-mini` for OpenAI)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_TEMPERATURE` (default `0.2`)
-  - `TIMEWARRIOR_EXT_DYNAMICS_LLM_TIMEOUT` seconds (default `2.0`)
-  - `TIMEWARRIOR_EXT_DYNAMICS_OPENAI_API_KEY` (required when provider is `openai`)
+Environment variables mirror the header keys by uppercasing and replacing dots with underscores:
+
+- `TIMEWARRIOR_REPORTS_DYNAMICS_CONFIG_FILE`
+- `TIMEWARRIOR_REPORTS_DYNAMICS_ANNOTATION_DELIMITER`
+- `TIMEWARRIOR_REPORTS_DYNAMICS_ANNOTATION_OUTPUT_SEPARATOR`
+- `TIMEWARRIOR_REPORTS_DYNAMICS_EXCLUDE_TAGS`
+
+LLM:
+
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_ENABLED` (true/false; default off)
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_PROVIDER` (`ollama` default, or `openai`)
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_ENDPOINT` (default `http://127.0.0.1:11434/api/generate` for Ollama, `https://api.openai.com/v1/chat/completions` for OpenAI)
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_MODEL` (default `llama3` for Ollama; set e.g. `gpt-4o-mini` for OpenAI)
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_TEMPERATURE` (default `0.2`)
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_TIMEOUT` seconds (default `2.0`)
+- `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_OPENAI_API_KEY` (required when provider is `openai`)
 
 ## LLM Refinement (Optional)
 

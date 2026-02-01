@@ -27,29 +27,38 @@ Descriptions and comments are rendered as multi-line cells; hidden segments (`++
 
 ## Configuration
 
-The report honours the same sources as the Dynamics CSV report, but only through `.dynamics_config.json` and environment variables:
+Configuration is resolved in this order (later overrides earlier):
 
-1. Per-project overrides from `.dynamics_config.json`
-2. Environment variables (`TIMEWARRIOR_EXT_DYNAMICS_…`)
-3. Built-in defaults
-
-Supported environment variables mirror the CSV exporter:
-
-- `TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON`
-- `TIMEWARRIOR_EXT_DYNAMICS_ANNOTATION_DELIMITER`
-- `TIMEWARRIOR_EXT_DYNAMICS_OUTPUT_SEPARATOR`
+1. Built-in defaults
+2. Timewarrior report header (`reports.dynamics.*`)
+3. Environment variables (`TIMEWARRIOR_REPORTS_DYNAMICS_*`)
 
 ### Timewarrior report configuration
-
-- `reports.dynamics.exclude_tags`: comma-separated list of tags to drop from the Dynamics output.
 
 Example:
 
 ```
+reports.dynamics.config_file = ~/.config/timew/dynamics.json
+reports.dynamics.annotation_delimiter = ; 
+reports.dynamics.annotation_output_separator = ;\n
 reports.dynamics.exclude_tags = vacation, sick, holiday
 ```
 
+Supported keys:
+
+- `reports.dynamics.config_file`
+- `reports.dynamics.annotation_delimiter`
+- `reports.dynamics.annotation_output_separator`
+- `reports.dynamics.exclude_tags`
+
 Any entry containing one of the excluded tags is skipped entirely. This setting is read from the Timewarrior report header, so it applies when using `timew report dynamics_summary`.
+
+### Environment Variables
+
+- `TIMEWARRIOR_REPORTS_DYNAMICS_CONFIG_FILE`
+- `TIMEWARRIOR_REPORTS_DYNAMICS_ANNOTATION_DELIMITER`
+- `TIMEWARRIOR_REPORTS_DYNAMICS_ANNOTATION_OUTPUT_SEPARATOR`
+- `TIMEWARRIOR_REPORTS_DYNAMICS_EXCLUDE_TAGS`
 
 ## Merging & Rounding
 

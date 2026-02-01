@@ -5,25 +5,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-try:
-    import json5 as json
-except ImportError:
-    import json
-import math
-import os
 import sys
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
-TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
-DEFAULT_ANNOTATION_DELIMITER = "; "
-DEFAULT_OUTPUT_SEPARATOR = ";\n"
-CONFIG_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_CONFIG_JSON"
-ANNOTATION_DELIMITER_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_ANNOTATION_DELIMITER"
-OUTPUT_SEPARATOR_ENV_VAR = "TIMEWARRIOR_EXT_DYNAMICS_OUTPUT_SEPARATOR"
-DEFAULT_CONFIG_FILENAME = ".dynamics_config.json"
-DEFAULT_TYPE = "Work"
-DEFAULT_MERGE_MAX_DESCRIPTION_LENGTH = 500
+from dynamics_common import (
+    DynamicsRecord,
+    build_dynamics_records,
+    load_project_configuration,
+    parse_timew_export,
+    resolve_report_config,
+    sanitize_description,
+    split_report_input,
+)
 
 ANSI_RESET = "\033[0m"
 ANSI_UNDERLINE = "\033[4m"
@@ -49,220 +42,9 @@ class DynamicsRow:
         return f"{hours}:{minutes:02d}"
 
 
-def split_report_input(stream: Iterable[str]) -> Tuple[Dict[str, str], str]:
-    content = "".join(stream)
-    if "\n\n" not in content:
-        return {}, content
-
-    header_text, payload = content.split("\n\n", 1)
-    if not header_text.strip() or header_text.lstrip().startswith("["):
-        return {}, content
-
-    header_lines = header_text.splitlines()
-    if not any(": " in line for line in header_lines):
-        return {}, content
-
-    config: Dict[str, str] = {}
-    for line in header_lines:
-        if not line.strip():
-            continue
-        key, _, remainder = line.partition(": ")
-        if not key:
-            continue
-        config[key.strip()] = remainder.rstrip("\n")
-
-    return config, payload
-
-
-def parse_timew_export(payload: str) -> List[dict]:
-    return json.loads(payload) if payload else []
-
-
-def parse_exclude_tags(config: Dict[str, str]) -> set[str]:
-    raw = config.get("reports.dynamics.exclude_tags", "")
-    if not raw:
-        return set()
-    return {tag.strip() for tag in raw.split(",") if tag.strip()}
-
-
-def has_excluded_tags(tags: Sequence[str], excluded_tags: set[str]) -> bool:
-    if not excluded_tags or not tags:
-        return False
-    return any(tag in excluded_tags for tag in tags)
-
-
-def calculate_working_time(
-    start: datetime, end: datetime, multiplier: float = 1.0
-) -> int:
-    total_seconds = (end - start).total_seconds()
-    total_seconds *= multiplier
-    total_minutes = round(total_seconds / 60)
-    return math.ceil(total_minutes / 15) * 15
-
-
-def join_unique(items: Sequence[str], delimiter: str) -> str:
-    seen: List[str] = []
-    for item in items:
-        if item not in seen:
-            seen.append(item)
-    return delimiter.join(seen)
-
-
-def merge_annotations(existing: str, new: str, delimiter: str) -> str:
-    merged = delimiter.join([existing, new])
-    return join_unique(merged.split(delimiter), delimiter)
-
-
-def sanitize_description(text: str, delimiter: str, output_separator: str) -> str:
-    parts = text.split(delimiter)
-    visible = [
-        part for part in parts if not (part.startswith("++") and part.endswith("++"))
-    ]
-    return output_separator.join(visible)
-
-
-def load_project_configuration(config_filename: str) -> List[dict]:
-    config_path = os.path.join(sys.path[0], config_filename)
-    with open(config_path, encoding="utf-8") as config_file:
-        return json.load(config_file)
-
-
-def resolve_project_config(tags: Sequence[str], configs: Sequence[dict]) -> dict:
-    tag_set = set(tags)
-    matched: Optional[dict] = None
-
-    for config in configs:
-        config_tags = set(config.get("timew_tags", []))
-        if config_tags == tag_set:
-            return config
-        if config_tags < tag_set:
-            if matched is None:
-                matched = config
-                continue
-            current = set(matched.get("timew_tags", []))
-            if len(tag_set - config_tags) < len(tag_set - current):
-                matched = config
-
-    if matched:
-        return matched
-
-    if tag_set:
-        project_note = f"NO PROJECT FOUND FOR THESE TAGS: {', '.join(tags)}"
-    else:
-        project_note = "NO TAGS DEFINED TO THIS TIME ENTRY"
-
-    return {"project": project_note, "project_task": "-", "role": "-"}
-
-
-def build_dynamics_row(
-    entry: dict,
-    project_config: dict,
-    annotation_delimiter_override: Optional[str],
-    output_separator_override: Optional[str],
-) -> Tuple[Optional[DynamicsRow], bool]:
-    if "end" not in entry:
-        return None, False
-
-    start_dt = datetime.strptime(entry["start"], TIMEW_DATETIME_FORMAT)
-    end_dt = datetime.strptime(entry["end"], TIMEW_DATETIME_FORMAT)
-
-    project_value = project_config.get("project", "")
-    project_task_value = project_config.get("project_task", "")
-    role_value = project_config.get("role", "")
-    entry_type = project_config.get("type", DEFAULT_TYPE)
-
-    annotation_delimiter = (
-        annotation_delimiter_override
-        if annotation_delimiter_override is not None
-        else project_config.get("annotation_delimiter", DEFAULT_ANNOTATION_DELIMITER)
-    )
-    if not annotation_delimiter:
-        annotation_delimiter = DEFAULT_ANNOTATION_DELIMITER
-
-    output_separator = (
-        output_separator_override
-        if output_separator_override is not None
-        else project_config.get("annotation_output_separator", DEFAULT_OUTPUT_SEPARATOR)
-    )
-    if not output_separator:
-        output_separator = DEFAULT_OUTPUT_SEPARATOR
-
-    annotation = entry.get("annotation", "")
-    if "description_prefix" in project_config:
-        description = project_config["description_prefix"] + annotation_delimiter + annotation
-    else:
-        description = annotation
-
-    external_comment = project_config.get("external_comment", "")
-    multiplier = float(project_config.get("multiplier", 1))
-    merge_on_equal_tags = bool(project_config.get("merge_on_equal_tags", False))
-
-    duration_minutes = calculate_working_time(start_dt, end_dt, multiplier)
-
-    row = DynamicsRow(
-        date=start_dt.astimezone().strftime("%Y-%m-%d"),
-        duration_minutes=duration_minutes,
-        project=project_value,
-        project_task=project_task_value,
-        role=role_value,
-        type=entry_type,
-        description=description,
-        external_comment=external_comment,
-        annotation_delimiter=annotation_delimiter,
-        output_separator=output_separator,
-    )
-
-    return row, merge_on_equal_tags
-
-
-def merge_entries(entries: List[DynamicsRow], new_entry: DynamicsRow, merge_on_equal_tags: bool) -> None:
-    for index, existing in enumerate(entries):
-        if (
-            existing.date == new_entry.date
-            and existing.project == new_entry.project
-            and existing.project_task == new_entry.project_task
-            and existing.role == new_entry.role
-            and existing.type == new_entry.type
-        ):
-            if existing.description == new_entry.description:
-                entries[index].duration_minutes += new_entry.duration_minutes
-                return
-
-            if (
-                merge_on_equal_tags
-                and len(existing.description) + len(new_entry.description)
-                <= DEFAULT_MERGE_MAX_DESCRIPTION_LENGTH
-            ):
-                entries[index].duration_minutes += new_entry.duration_minutes
-                entries[index].description = merge_annotations(
-                    existing.description,
-                    new_entry.description,
-                    existing.annotation_delimiter,
-                )
-                return
-
-            existing_title = existing.description.split(existing.annotation_delimiter)[0]
-            new_title = new_entry.description.split(new_entry.annotation_delimiter)[0]
-            if (
-                existing_title == new_title
-                and len(existing.description) + len(new_entry.description)
-                <= DEFAULT_MERGE_MAX_DESCRIPTION_LENGTH
-            ):
-                entries[index].duration_minutes += new_entry.duration_minutes
-                remainder = existing.annotation_delimiter.join(
-                    new_entry.description.split(new_entry.annotation_delimiter)[1:]
-                )
-                entries[index].description = merge_annotations(
-                    existing.description,
-                    remainder,
-                    existing.annotation_delimiter,
-                )
-                return
-
-    entries.append(new_entry)
-
-
-def build_table_rows(entries: Sequence[DynamicsRow]) -> Tuple[List[List[str]], int, List[int]]:
+def build_table_rows(
+    entries: Sequence[DynamicsRow],
+) -> Tuple[List[List[str]], int, List[int]]:
     rows: List[List[str]] = []
     master_flags: List[int] = []
     total_minutes = 0
@@ -341,7 +123,9 @@ def print_header(layout: str, headers: Sequence[str]) -> None:
     print(" ".join(underlined))
 
 
-def print_rows(layout: str, rows: Sequence[Sequence[str]], master_flags: Sequence[int]) -> None:
+def print_rows(
+    layout: str, rows: Sequence[Sequence[str]], master_flags: Sequence[int]
+) -> None:
     master_index = -1
     for index, row in enumerate(rows):
         if master_flags[index]:
@@ -373,32 +157,40 @@ def format_total_duration(total_minutes: int) -> str:
     return f"{hours}:{minutes:02d}:00"
 
 
+def build_rows(records: Sequence[DynamicsRecord]) -> List[DynamicsRow]:
+    rows: List[DynamicsRow] = []
+    for record in records:
+        rows.append(
+            DynamicsRow(
+                date=record.date,
+                duration_minutes=record.duration_minutes,
+                project=record.project_display,
+                project_task=record.project_task_display,
+                role=record.role,
+                type=record.type,
+                description=record.description,
+                external_comment=record.external_comment,
+                annotation_delimiter=record.annotation_delimiter,
+                output_separator=record.output_separator,
+            )
+        )
+    return rows
+
+
 def main() -> None:
     report_config, payload = split_report_input(sys.stdin)
     timew_entries = parse_timew_export(payload)
-    excluded_tags = parse_exclude_tags(report_config)
+    config = resolve_report_config(report_config)
+    project_configs = load_project_configuration(config.config_file)
 
-    config_filename = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_FILENAME)
-    project_configs = load_project_configuration(config_filename)
-
-    annotation_delimiter_override = os.getenv(ANNOTATION_DELIMITER_ENV_VAR)
-    output_separator_override = os.getenv(OUTPUT_SEPARATOR_ENV_VAR)
-
-    dynamics_rows: List[DynamicsRow] = []
-    for entry in timew_entries:
-        tags = entry.get("tags", [])
-        if has_excluded_tags(tags, excluded_tags):
-            continue
-        project_config = resolve_project_config(tags, project_configs)
-        row, merge_on_equal_tags = build_dynamics_row(
-            entry,
-            project_config,
-            annotation_delimiter_override,
-            output_separator_override,
-        )
-        if row is None:
-            continue
-        merge_entries(dynamics_rows, row, merge_on_equal_tags)
+    dynamics_records = build_dynamics_records(
+        timew_entries,
+        project_configs,
+        config,
+        merge_on_display_values=True,
+        include_format_in_merge=False,
+    )
+    dynamics_rows = build_rows(dynamics_records)
 
     headers = [
         "Date",
