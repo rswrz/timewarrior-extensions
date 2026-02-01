@@ -6,7 +6,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import sys
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
+
+from summary_table_layout import allocate_widths, terminal_width, wrap_text
 
 from dynamics_common import (
     DynamicsRecord,
@@ -68,13 +70,11 @@ def build_table_rows(
         external_lines.extend(["" for _ in range(max_lines - len(external_lines))])
 
         for index, (desc, ext) in enumerate(zip(description_lines, external_lines)):
-            project_display = truncate_for_table(row.project)
-            task_display = truncate_for_table(row.project_task)
             rows.append(
                 [
                     row.date if index == 0 else "",
-                    project_display if index == 0 else "",
-                    task_display if index == 0 else "",
+                    row.project if index == 0 else "",
+                    row.project_task if index == 0 else "",
                     row.role if index == 0 else "",
                     row.type if index == 0 else "",
                     desc,
@@ -88,26 +88,21 @@ def build_table_rows(
 
 
 def compute_column_widths(
-    rows: Sequence[Sequence[str]], headers: Sequence[str]
-) -> List[int]:
+    rows: Sequence[Sequence[str]],
+    headers: Sequence[str],
+    terminal_columns: Optional[int],
+) -> tuple[List[int], bool]:
     widths = [len(header) for header in headers]
     for row in rows:
         for index, cell in enumerate(row):
             widths[index] = max(widths[index], len(cell))
-    max_widths = {1: 32, 2: 32}
-    for index, max_width in max_widths.items():
-        if widths[index] > max_width:
-            widths[index] = max_width
-    return widths
-
-
-def truncate_for_table(value: str, max_length: int = 32) -> str:
-    if len(value) <= max_length:
-        return value
-    ellipsis = "…"
-    if max_length <= len(ellipsis):
-        return value[:max_length]
-    return value[: max_length - len(ellipsis)] + ellipsis
+    total_width = sum(widths) + (len(widths) - 1)
+    if terminal_columns and total_width > terminal_columns:
+        min_widths = list(widths)
+        for index in (1, 2, 5, 6):
+            min_widths[index] = len(headers[index])
+        return allocate_widths(widths, [1, 2, 5, 6], terminal_columns, min_widths), True
+    return widths, False
 
 
 def build_layout(widths: Sequence[int]) -> str:
@@ -124,22 +119,48 @@ def print_header(layout: str, headers: Sequence[str]) -> None:
 
 
 def print_rows(
-    layout: str, rows: Sequence[Sequence[str]], master_flags: Sequence[int]
+    layout: str,
+    rows: Sequence[Sequence[str]],
+    master_flags: Sequence[int],
+    widths: Sequence[int],
+    constrained: bool,
 ) -> None:
     master_index = -1
     for index, row in enumerate(rows):
         if master_flags[index]:
             master_index += 1
+        if constrained:
+            wrapped_columns = {
+                column_index: wrap_text(row[column_index], widths[column_index])
+                for column_index in (1, 2, 5, 6)
+            }
+            max_lines = max(
+                (len(lines) for lines in wrapped_columns.values()), default=1
+            )
+        else:
+            wrapped_columns = {}
+            max_lines = 1
         color_prefix = ANSI_ROW_ALT if master_index % 2 else ""
         color_suffix = ANSI_RESET if color_prefix else ""
         description_is_empty = row[5] == ""
         primary_line = row[7] != ""
         highlight = ANSI_NO_DESCRIPTION if description_is_empty and primary_line else ""
         reset = ANSI_RESET if highlight else ""
-        if highlight:
-            print(f"{highlight}{layout.format(*row)}{reset}")
-        else:
-            print(f"{color_prefix}{layout.format(*row)}{color_suffix}")
+
+        for line_index in range(max_lines):
+            if line_index == 0:
+                output_row = list(row)
+            else:
+                output_row = ["" for _ in row]
+            if constrained:
+                for column_index, lines in wrapped_columns.items():
+                    output_row[column_index] = (
+                        lines[line_index] if line_index < len(lines) else ""
+                    )
+            if highlight:
+                print(f"{highlight}{layout.format(*output_row)}{reset}")
+            else:
+                print(f"{color_prefix}{layout.format(*output_row)}{color_suffix}")
 
 
 def print_total(widths: Sequence[int], total_minutes: int) -> None:
@@ -204,11 +225,12 @@ def main() -> None:
     ]
 
     table_rows, total_minutes, master_flags = build_table_rows(dynamics_rows)
-    widths = compute_column_widths(table_rows, headers)
+    terminal_columns = terminal_width(sys.stdout)
+    widths, constrained = compute_column_widths(table_rows, headers, terminal_columns)
     layout = build_layout(widths)
 
     print_header(layout, headers)
-    print_rows(layout, table_rows, master_flags)
+    print_rows(layout, table_rows, master_flags, widths, constrained)
     print_total(widths, total_minutes)
 
 
