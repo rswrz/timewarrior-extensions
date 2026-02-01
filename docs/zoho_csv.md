@@ -59,7 +59,7 @@ Example (`.zoho_config.json`):
 
 ## Notes Handling
 
-- Timewarrior annotations are converted to multiline notes by replacing `; ` with `;\n`.
+- Timewarrior annotations are converted to multiline notes by replacing `; ` with `\n`.
 - `note_prefix` adds a line above the annotation content (always ending with `\n`).
 - When multiple entries merge (same date/project/task/notes title), note items are deduplicated while preserving order.
 - Segments wrapped in `++hidden++` are removed from the final CSV output.

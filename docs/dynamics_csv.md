@@ -48,7 +48,7 @@ The script reads the Timewarrior report input from stdin per the Timewarrior ext
 
 - Input structure uses an annotation delimiter (default `; `). The description is typically `Title; item1; item2; …`.
 - Any segment wrapped as `++hidden++` is excluded from the CSV output.
-- Output formatting for the Description column joins segments with an output separator (default `;\n`) so list items render on separate lines inside a single CSV cell.
+- Output formatting for the Description column joins segments with an output separator (default `\n`) so list items render on separate lines inside a single CSV cell.
 
 You can change both the input delimiter and the output separator globally via env vars or per mapping via config.
 
@@ -67,7 +67,7 @@ Example:
 ```
 reports.dynamics.config_file = ~/.config/timew/dynamics.json
 reports.dynamics.annotation_delimiter = ; 
-reports.dynamics.annotation_output_separator = ;\n
+reports.dynamics.annotation_output_separator = \n
 reports.dynamics.exclude_tags = vacation, sick, holiday
 reports.dynamics.llm.enabled = true
 reports.dynamics.llm.provider = openai
@@ -82,7 +82,7 @@ Supported keys:
 
 - `reports.dynamics.config_file`: path to the Dynamics config JSON.
 - `reports.dynamics.annotation_delimiter`: delimiter for annotation segments (default `; `).
-- `reports.dynamics.annotation_output_separator`: joiner for visible segments in CSV (default `;\n`).
+- `reports.dynamics.annotation_output_separator`: joiner for visible segments in CSV (default `\n`).
 - `reports.dynamics.exclude_tags`: comma-separated list of tags to skip.
 - `reports.dynamics.llm.*`: LLM settings (see LLM section below).
 
@@ -100,7 +100,7 @@ Each mapping object may include:
 - `description_prefix` (string): prepended to the description (e.g., to enforce a title)
 - `external_comment` (string)
 - `annotation_delimiter` (string, default `; `)
-- `annotation_output_separator` (string, default `;\n`)
+- `annotation_output_separator` (string, default `\n`)
 - Optional LLM overrides (see below):
   - `llm_enabled` (boolean), `llm_model` (string), `llm_temperature` (number), `llm_timeout` (seconds), `llm_endpoint` (URL), `llm_provider` (string), `llm_api_key` (string)
 
@@ -118,7 +118,7 @@ Example:
     "type": "Work",
     "multiplier": 1.0,
     "annotation_delimiter": "; ",
-    "annotation_output_separator": ";\n"
+    "annotation_output_separator": "\n"
   },
   {
     "project": "Example Project 2",

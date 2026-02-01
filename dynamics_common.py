@@ -19,7 +19,7 @@ from urllib import error as urlerror, request as urlrequest
 
 TIMEW_DATETIME_FORMAT = "%Y%m%dT%H%M%S%z"
 DEFAULT_ANNOTATION_DELIMITER = "; "
-DEFAULT_OUTPUT_SEPARATOR = ";\n"
+DEFAULT_OUTPUT_SEPARATOR = "\n"
 DEFAULT_CONFIG_FILENAME = ".dynamics_config.json"
 DEFAULT_TYPE = "Work"
 MAX_DESCRIPTION_LENGTH = 500

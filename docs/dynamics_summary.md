@@ -40,7 +40,7 @@ Example:
 ```
 reports.dynamics.config_file = ~/.config/timew/dynamics.json
 reports.dynamics.annotation_delimiter = ; 
-reports.dynamics.annotation_output_separator = ;\n
+reports.dynamics.annotation_output_separator = \n
 reports.dynamics.exclude_tags = vacation, sick, holiday
 ```
 
