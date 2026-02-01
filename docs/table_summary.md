@@ -1,11 +1,11 @@
 # Table Timewarrior Extension
 
-`table.py` prints a colorized summary similar to `timew summary`, but with extra context (annotations split into bullet-style lines, gaps between entries, and grand totals).
+`table_summary.py` prints a colorized summary similar to `timew summary`, but with extra context (annotations split into bullet-style lines, gaps between entries, and grand totals).
 
 ## Usage
 
-- As a Timewarrior report: `timew report table :today`
-- Pipe directly: `timew export :today | ./table.py`
+- As a Timewarrior report: `timew report table_summary :today`
+- Pipe directly: `timew export :today | ./table_summary.py`
 
 The extension reads stdin (after the header block) and writes a formatted table to stdout.
 
@@ -36,4 +36,3 @@ The script honors the range supplied by Timewarrior’s report API (e.g. `Range:
 - Long annotation items wrap at 100 characters; continuation lines are indented.
 - Hidden segments using `++secret++` remain part of the display (matching the default summary behavior).
 - Color codes use ANSI escape sequences; when piping to plain text files, colors remain in the output.
-

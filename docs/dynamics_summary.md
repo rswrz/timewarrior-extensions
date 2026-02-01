@@ -1,6 +1,6 @@
 # Dynamics Summary Report
 
-`dynamics_summary.py` combines the Dynamics report logic (tag-based project mapping, rounding, merging) with the console table presentation of `table.py`. The result is a readable table view that still honours the Dynamics configuration.
+`dynamics_summary.py` combines the Dynamics report logic (tag-based project mapping, rounding, merging) with the console table presentation of `table_summary.py`. The result is a readable table view that still honours the Dynamics configuration.
 
 ## Usage
 
@@ -49,4 +49,4 @@ The table ends with a grand total of all displayed durations, formatted as `HH:M
 
 ## Colours
 
-Like `table.py`, the output uses simple ANSI highlighting (alternating row shading and a distinct colour for missing descriptions). When piping to files that don’t support colour, the escape codes remain visible.
+Like `table_summary.py`, the output uses simple ANSI highlighting (alternating row shading and a distinct colour for missing descriptions). When piping to files that don’t support colour, the escape codes remain visible.

@@ -1,11 +1,11 @@
 # Zoho Timewarrior Extension
 
-`zoho.py` exports Timewarrior entries as CSV rows ready to import into Zoho, handling project/task lookups, quarter-hour rounding, and note merging.
+`zoho_csv.py` exports Timewarrior entries as CSV rows ready to import into Zoho, handling project/task lookups, quarter-hour rounding, and note merging.
 
 ## Usage
 
-- As a report extension: `timew report zoho :week > zoho.csv`
-- Or via pipe: `timew export :week | ./zoho.py > zoho.csv`
+- As a report extension: `timew report zoho_csv :week > zoho.csv`
+- Or via pipe: `timew export :week | ./zoho_csv.py > zoho.csv`
 
 The script reads the JSON export from stdin (after Timewarrior’s header block) and writes CSV to stdout.
 
@@ -86,4 +86,3 @@ Within a single day, entries are merged when:
 - “No project found” rows mean the tag combination didn’t match any config entry.
 - Double-check `note_prefix` usage if merged notes look duplicated: unique filtering happens per note segment.
 - Inspect the CSV in a text editor if spreadsheet import appears misaligned; all fields are quoted for safety.
-

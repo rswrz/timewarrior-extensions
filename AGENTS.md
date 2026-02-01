@@ -5,7 +5,7 @@ The goal of this guide is to make AI-assisted work safe, consistent, and low fri
 
 ## Repo layout
 
-- Extension scripts live at the repo root (e.g. `dynamics_csv.py`, `table.py`).
+- Extension scripts live at the repo root (e.g. `dynamics_csv.py`, `table_summary.py`).
 - Per-extension documentation lives in `docs/`.
 - Example config files use `*_config_example.json` and should never contain real secrets.
 
@@ -23,7 +23,7 @@ See `docs/extension_primer.md` for a short overview of the input/output flow.
 ## Conventions in this repo
 
 - CSV exporters: `*_csv.py`
-- Console summaries: `*_summary.py` and `table.py`
+- Console summaries: `*_summary.py`
 - Configs are JSON (JSON5 optional via `requirements.txt`).
 - Environment variable prefixes:
   - `TIMEWARRIOR_EXT_<NAME>_...`

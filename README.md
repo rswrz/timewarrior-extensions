@@ -6,9 +6,9 @@ A collection of personal [Timewarrior](https://timewarrior.net/) [extensions](ht
 
 - `dynamics_csv.py` — Export + merge entries to CSV (Dynamics‑ready), with tag→project mapping, rounding, and optional LLM description refinement. See [`docs/dynamics_csv.md`](docs/dynamics_csv.md)
 - `dynamics_summary.py` — Table view using Dynamics logic (merging, rounding, config). See [`docs/dynamics_summary.md`](docs/dynamics_summary.md)
-- `zoho.py` — Export entries to a Zoho-compatible CSV with tag-based project/task mapping and note merging. See [`docs/zoho.md`](docs/zoho.md)
+- `zoho_csv.py` — Export entries to a Zoho-compatible CSV with tag-based project/task mapping and note merging. See [`docs/zoho_csv.md`](docs/zoho_csv.md)
 - `csv.py` — Output raw `timew export` entries as a simple CSV. See [`docs/csv.md`](docs/csv.md)
-- `table.py` — Colorized summary view with annotations, gaps, and totals. See [`docs/table.md`](docs/table.md)
+- `table_summary.py` — Colorized summary view with annotations, gaps, and totals. See [`docs/table_summary.md`](docs/table_summary.md)
 - `overtime_summary.py` — Overtime report with configurable work hours and leave days. See [`docs/overtime_summary.md`](docs/overtime_summary.md)
 - `overtime_csv.py` — CSV export of overtime calculations. See [`docs/overtime_csv.md`](docs/overtime_csv.md)
 - `debug.py` — Print the incoming Timewarrior payload to stdout unchanged (handy for troubleshooting pipelines).
