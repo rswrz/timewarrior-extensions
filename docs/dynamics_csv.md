@@ -14,7 +14,7 @@ The script reads the Timewarrior report input from stdin per the Timewarrior ext
 ## CSV Columns
 
 - Date
-- Duration (minutes; rounded up to 15-minute blocks after multiplier)
+- Duration (minutes; rounded to 15-minute blocks per exported line item after multiplier)
 - Project (id or name)
 - Project Task (id or name)
 - Role
@@ -41,8 +41,38 @@ The script reads the Timewarrior report input from stdin per the Timewarrior ext
 
 ## Rounding and Multipliers
 
-- Duration = ceil(round((end - start) × multiplier in minutes) / 15) × 15
-- `multiplier` default is 1.0; can be configured per mapping.
+Dynamics exports are rounded per exported line item (not per raw Timewarrior
+interval):
+
+- Raw duration is computed from exact interval seconds.
+- Intervals that merge into the same exported line item are consolidated first.
+- The per-project `multiplier` is applied to the consolidated raw duration.
+- The result is rounded up to 15-minute blocks once per exported line item.
+
+In seconds (15 minutes = 900 seconds):
+
+- `rounded_seconds = ceil((raw_seconds_total × multiplier) / 900) × 900`
+- `Duration (minutes) = rounded_seconds / 60`
+
+`multiplier` default is 1.0; it can be configured per mapping.
+
+## Optional absorption of admin time (absorb tag)
+
+If configured, entries with a special tag (e.g. `timetracking`)
+can be absorbed into the natural rounding slack of other exported line items on
+the same day.
+
+- Enable by setting `reports.dynamics.absorb_tag` (empty or missing disables).
+- Classification is "contains tag": any entry whose tags include the absorb tag
+  is treated as absorbable admin time, even if it also has normal mapping tags.
+- Absorption is per day and only uses slack from entries that are actually
+  exported (excluded-tag entries contribute no slack).
+- Slack is computed pre-multiplier on consolidated non-absorb line items:
+  - `slack_seconds(line) = ceil(raw_seconds(line) / 900) × 900 - raw_seconds(line)`
+- Absorb-tag line items are reduced by consuming available slack; items reduced
+  to zero are omitted from the CSV.
+- Any remaining absorb-tag time is exported normally and rounded like any other
+  line item.
 
 ## Description Formatting
 
@@ -84,6 +114,7 @@ Supported keys:
 - `reports.dynamics.annotation_delimiter`: delimiter for annotation segments (default `; `).
 - `reports.dynamics.annotation_output_separator`: joiner for visible segments in CSV (default `\n`).
 - `reports.dynamics.exclude_tags`: comma-separated list of tags to skip.
+- `reports.dynamics.absorb_tag`: tag name to enable per-day absorption (optional).
 - `reports.dynamics.llm.*`: LLM settings (see LLM section below).
 
 Any entry containing one of the excluded tags is skipped entirely. This setting is read from the Timewarrior report header, so it applies when using `timew report dynamics_csv`.

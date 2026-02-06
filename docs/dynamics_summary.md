@@ -21,7 +21,7 @@ It skips the standard report header, reads the JSON payload from stdin, and writ
 - `Type`
 - `Description` – annotation, split by the Dynamics delimiter and merged according to the Dynamics rules
 - `External Comments`
-- `Duration` – rounded to the next 15 minutes (HH:MM)
+- `Duration` – rounded to the next 15 minutes per exported line item (HH:MM)
 
 Descriptions and comments are rendered as multi-line cells; hidden segments (`++secret++`) are removed from display.
 
@@ -50,6 +50,7 @@ Supported keys:
 - `reports.dynamics.annotation_delimiter`
 - `reports.dynamics.annotation_output_separator`
 - `reports.dynamics.exclude_tags`
+- `reports.dynamics.absorb_tag` (optional)
 
 Any entry containing one of the excluded tags is skipped entirely. This setting is read from the Timewarrior report header, so it applies when using `timew report dynamics_summary`.
 
@@ -62,7 +63,22 @@ Any entry containing one of the excluded tags is skipped entirely. This setting 
 
 ## Merging & Rounding
 
-Entries are rounded to 15-minute blocks (configurable per project with `multiplier`). Records on the same day with matching project/task/role/type are merged using the same logic as the Dynamics CSV report, preventing duplicates in the table.
+Entries are merged into exported line items first and then rounded to 15-minute
+blocks once per exported line item (configurable per project with
+`multiplier`). Records on the same day with matching project/task/role/type are
+merged using the same logic as the Dynamics CSV report, preventing duplicates in
+the table.
+
+## Absorption footer (optional)
+
+When `reports.dynamics.absorb_tag` is configured and the input contains at least
+one entry with that tag, the summary prints an informational footer after the
+total.
+
+- It shows (per day): available slack, total absorb-tag raw time, how much was
+  absorbed, leftover raw time, and (when leftover exists) the rounded exported
+  time.
+- The footer is informational only; it does not change the table rows or total.
 
 ## Totals
 

@@ -28,6 +28,7 @@ CONFIG_FILE_KEY = "reports.dynamics.config_file"
 ANNOTATION_DELIMITER_KEY = "reports.dynamics.annotation_delimiter"
 OUTPUT_SEPARATOR_KEY = "reports.dynamics.annotation_output_separator"
 EXCLUDE_TAGS_KEY = "reports.dynamics.exclude_tags"
+ABSORB_TAG_KEY = "reports.dynamics.absorb_tag"
 
 LLM_ENABLED_KEY = "reports.dynamics.llm.enabled"
 LLM_PROVIDER_KEY = "reports.dynamics.llm.provider"
@@ -62,7 +63,18 @@ class DynamicsConfig:
     annotation_delimiter_override: Optional[str]
     annotation_output_separator_override: Optional[str]
     exclude_tags: set[str]
+    absorb_tag: Optional[str]
     llm: LLMConfig
+
+
+@dataclass
+class AbsorptionDayReport:
+    date: str
+    slack_seconds: int
+    admin_raw_seconds: int
+    absorbed_seconds: int
+    leftover_raw_seconds: int
+    leftover_exported_minutes: int
 
 
 @dataclass
@@ -395,6 +407,12 @@ def resolve_report_config(header: Dict[str, str]) -> DynamicsConfig:
     exclude_tags_value = _resolve_value(header, EXCLUDE_TAGS_KEY, "")
     exclude_tags = _parse_exclude_tags_value(exclude_tags_value)
 
+    absorb_tag = _resolve_override_value(header, ABSORB_TAG_KEY)
+    if absorb_tag is not None:
+        absorb_tag = absorb_tag.strip()
+        if not absorb_tag:
+            absorb_tag = None
+
     llm_config = _resolve_llm_config(header)
 
     return DynamicsConfig(
@@ -402,23 +420,54 @@ def resolve_report_config(header: Dict[str, str]) -> DynamicsConfig:
         annotation_delimiter_override=annotation_delimiter_override,
         annotation_output_separator_override=output_separator_override,
         exclude_tags=exclude_tags,
+        absorb_tag=absorb_tag,
         llm=llm_config,
     )
 
 
-def calculate_working_time(
-    datetime_start: datetime, datetime_end: datetime, multiplier: float = 1
-) -> int:
-    """Return minutes rounded up to 15-minute blocks after applying multiplier."""
+def _ceil_div(numerator: float, divisor: int) -> int:
+    return int(math.ceil(numerator / divisor)) if numerator > 0 else 0
 
-    datetime_delta = datetime_end - datetime_start
-    total_seconds = datetime_delta.total_seconds()
-    total_seconds_multiplied = total_seconds * multiplier
 
-    total_minutes = round(total_seconds_multiplied / 60)
-    total_minutes_rounded_15m = math.ceil(total_minutes / 15) * 15
+def round_seconds_to_15m_blocks(total_seconds: float) -> int:
+    """Round seconds up to 15-minute blocks (900s)."""
 
-    return total_minutes_rounded_15m
+    blocks = _ceil_div(total_seconds, 900)
+    return blocks * 900
+
+
+def billable_minutes_from_raw_seconds(raw_seconds: int, multiplier: float) -> int:
+    """Return billable minutes by applying multiplier then rounding once per line item."""
+
+    rounded_seconds = round_seconds_to_15m_blocks(float(raw_seconds) * float(multiplier))
+    return int(rounded_seconds // 60)
+
+
+def slack_seconds_from_raw_seconds(raw_seconds: int) -> int:
+    """Return available slack seconds from rounding raw time to 15-minute blocks (pre-multiplier)."""
+
+    return round_seconds_to_15m_blocks(float(raw_seconds)) - int(raw_seconds)
+
+
+@dataclass
+class DynamicsDraft:
+    date: str
+    raw_seconds: int
+    multiplier: float
+    tags: List[str]
+    project: str
+    project_task: str
+    project_display: str
+    project_task_display: str
+    role: str
+    type: str
+    description: str
+    external_comment: str
+    annotation_delimiter: str
+    output_separator: str
+    llm_settings: Dict[str, Any] = field(default_factory=dict)
+    absorbable: bool = False
+    sequence: int = 0
 
 
 def sanitize_description(
@@ -505,12 +554,13 @@ def has_excluded_tags(tags: Sequence[str], excluded_tags: set[str]) -> bool:
     return any(tag in excluded_tags for tag in tags)
 
 
-def build_dynamics_record(
+def build_dynamics_draft(
     timew_entry: dict,
     project_config: dict,
     config: DynamicsConfig,
-) -> Tuple[DynamicsRecord, bool]:
-    """Construct a DynamicsRecord from a timew record and config mapping."""
+    sequence: int,
+) -> Tuple[DynamicsDraft, bool]:
+    """Construct a DynamicsDraft from a timew record and config mapping."""
 
     timew_start = timew_entry["start"]
     timew_end = timew_entry["end"]
@@ -521,7 +571,7 @@ def build_dynamics_record(
     multiplier = (
         float(project_config["multiplier"]) if "multiplier" in project_config else 1
     )
-    duration_minutes = calculate_working_time(start_dt, end_dt, multiplier)
+    raw_seconds = int((end_dt - start_dt).total_seconds())
 
     project_value = (
         project_config["project_id"]
@@ -594,9 +644,14 @@ def build_dynamics_record(
     if "llm_api_key" in project_config:
         llm_settings["api_key"] = project_config["llm_api_key"]
 
-    record = DynamicsRecord(
+    tags = list(timew_entry.get("tags", []) or [])
+    absorbable = bool(config.absorb_tag and config.absorb_tag in tags)
+
+    draft = DynamicsDraft(
         date=start_dt.astimezone().strftime("%Y-%m-%d"),
-        duration_minutes=duration_minutes,
+        raw_seconds=raw_seconds,
+        multiplier=multiplier,
+        tags=tags,
         project=project_value,
         project_task=project_task_value,
         project_display=project_display,
@@ -608,9 +663,31 @@ def build_dynamics_record(
         annotation_delimiter=annotation_delimiter,
         output_separator=output_separator,
         llm_settings=llm_settings,
+        absorbable=absorbable,
+        sequence=sequence,
     )
 
-    return record, merge_on_equal_tags
+    return draft, merge_on_equal_tags
+
+
+def finalize_draft(draft: DynamicsDraft) -> DynamicsRecord:
+    return DynamicsRecord(
+        date=draft.date,
+        duration_minutes=billable_minutes_from_raw_seconds(
+            draft.raw_seconds, draft.multiplier
+        ),
+        project=draft.project,
+        project_task=draft.project_task,
+        project_display=draft.project_display,
+        project_task_display=draft.project_task_display,
+        role=draft.role,
+        type=draft.type,
+        description=draft.description,
+        external_comment=draft.external_comment,
+        annotation_delimiter=draft.annotation_delimiter,
+        output_separator=draft.output_separator,
+        llm_settings=draft.llm_settings,
+    )
 
 
 def build_dynamics_records(
@@ -620,7 +697,25 @@ def build_dynamics_records(
     merge_on_display_values: bool,
     include_format_in_merge: bool,
 ) -> List[DynamicsRecord]:
-    records: List[DynamicsRecord] = []
+    records, _report = build_dynamics_records_with_absorption_report(
+        timew_entries,
+        project_configs,
+        config,
+        merge_on_display_values=merge_on_display_values,
+        include_format_in_merge=include_format_in_merge,
+    )
+    return records
+
+
+def build_dynamics_records_with_absorption_report(
+    timew_entries: Sequence[dict],
+    project_configs: Sequence[dict],
+    config: DynamicsConfig,
+    merge_on_display_values: bool,
+    include_format_in_merge: bool,
+) -> Tuple[List[DynamicsRecord], List[AbsorptionDayReport]]:
+    drafts: List[DynamicsDraft] = []
+    sequence = 0
 
     for timew_entry in timew_entries:
         if "end" not in timew_entry:
@@ -631,35 +726,102 @@ def build_dynamics_records(
             continue
 
         project_config = resolve_project_config(tags, project_configs)
-        record, merge_on_equal_tags = build_dynamics_record(
+        draft, merge_on_equal_tags = build_dynamics_draft(
             timew_entry,
             project_config,
             config,
+            sequence=sequence,
         )
-        merge_records(
-            records,
-            record,
+        sequence += 1
+        merge_drafts(
+            drafts,
+            draft,
             merge_on_equal_tags,
             merge_on_display_values=merge_on_display_values,
             include_format_in_merge=include_format_in_merge,
         )
 
-    return records
+    absorption_report: List[AbsorptionDayReport] = []
+    if config.absorb_tag:
+        drafts, absorption_report = apply_absorption(drafts, config.absorb_tag)
+
+    records = [finalize_draft(draft) for draft in drafts]
+    return records, absorption_report
 
 
-def merge_records(
-    records: List[DynamicsRecord],
-    new_record: DynamicsRecord,
+def apply_absorption(
+    drafts: Sequence[DynamicsDraft], absorb_tag: str
+) -> Tuple[List[DynamicsDraft], List[AbsorptionDayReport]]:
+    """Reduce absorb-tag drafts by consuming same-day slack from non-absorb drafts."""
+
+    by_day: Dict[str, List[DynamicsDraft]] = {}
+    for draft in drafts:
+        by_day.setdefault(draft.date, []).append(draft)
+
+    updated: List[DynamicsDraft] = []
+    reports: List[AbsorptionDayReport] = []
+
+    for day in sorted(by_day.keys()):
+        day_drafts = list(sorted(by_day[day], key=lambda item: item.sequence))
+        admin = [item for item in day_drafts if item.absorbable and absorb_tag in item.tags]
+        work = [item for item in day_drafts if not (item.absorbable and absorb_tag in item.tags)]
+
+        if not admin:
+            updated.extend(day_drafts)
+            continue
+
+        slack_seconds = sum(slack_seconds_from_raw_seconds(item.raw_seconds) for item in work)
+        admin_raw_seconds = sum(item.raw_seconds for item in admin)
+
+        slack_remaining = slack_seconds
+        absorbed_seconds = 0
+
+        for item in admin:
+            if slack_remaining <= 0:
+                break
+            reduce_by = min(item.raw_seconds, slack_remaining)
+            item.raw_seconds -= reduce_by
+            slack_remaining -= reduce_by
+            absorbed_seconds += reduce_by
+
+        admin_left = [item for item in admin if item.raw_seconds > 0]
+        leftover_raw_seconds = sum(item.raw_seconds for item in admin_left)
+        leftover_exported_minutes = sum(
+            billable_minutes_from_raw_seconds(item.raw_seconds, item.multiplier)
+            for item in admin_left
+        )
+
+        reports.append(
+            AbsorptionDayReport(
+                date=day,
+                slack_seconds=slack_seconds,
+                admin_raw_seconds=admin_raw_seconds,
+                absorbed_seconds=absorbed_seconds,
+                leftover_raw_seconds=leftover_raw_seconds,
+                leftover_exported_minutes=leftover_exported_minutes,
+            )
+        )
+
+        updated.extend(work)
+        updated.extend(admin_left)
+
+    updated.sort(key=lambda item: item.sequence)
+    return updated, reports
+
+
+def merge_drafts(
+    drafts: List[DynamicsDraft],
+    new_draft: DynamicsDraft,
     merge_on_equal_tags: bool,
     merge_on_display_values: bool,
     include_format_in_merge: bool,
 ) -> None:
-    """Merge the new record into the list when a matching slot exists."""
+    """Merge the new draft into the list when a matching slot exists."""
 
-    for existing in records:
-        if not should_merge_base(
+    for existing in drafts:
+        if not should_merge_base_draft(
             existing,
-            new_record,
+            new_draft,
             merge_on_display_values=merge_on_display_values,
             include_format_in_merge=include_format_in_merge,
         ):
@@ -667,44 +829,44 @@ def merge_records(
 
         delimiter = existing.annotation_delimiter
 
-        if existing.description == new_record.description:
-            existing.duration_minutes += new_record.duration_minutes
+        if existing.description == new_draft.description:
+            existing.raw_seconds += new_draft.raw_seconds
             return
 
         if (
             merge_on_equal_tags
-            and len(existing.description) + len(new_record.description)
+            and len(existing.description) + len(new_draft.description)
             <= MAX_DESCRIPTION_LENGTH
         ):
-            existing.duration_minutes += new_record.duration_minutes
+            existing.raw_seconds += new_draft.raw_seconds
             existing.description = merge_annotations(
-                existing.description, new_record.description, delimiter
+                existing.description, new_draft.description, delimiter
             )
             return
 
         existing_title = existing.description.split(delimiter)[0]
-        new_title = new_record.description.split(delimiter)[0]
+        new_title = new_draft.description.split(delimiter)[0]
 
         if (
             existing_title == new_title
-            and len(existing.description) + len(new_record.description)
+            and len(existing.description) + len(new_draft.description)
             <= MAX_DESCRIPTION_LENGTH
         ):
-            existing.duration_minutes += new_record.duration_minutes
+            existing.raw_seconds += new_draft.raw_seconds
             note_items_without_title = delimiter.join(
-                new_record.description.split(delimiter)[1:]
+                new_draft.description.split(delimiter)[1:]
             )
             existing.description = merge_annotations(
                 existing.description, note_items_without_title, delimiter
             )
             return
 
-    records.append(new_record)
+    drafts.append(new_draft)
 
 
-def should_merge_base(
-    existing: DynamicsRecord,
-    new_record: DynamicsRecord,
+def should_merge_base_draft(
+    existing: DynamicsDraft,
+    new_draft: DynamicsDraft,
     merge_on_display_values: bool,
     include_format_in_merge: bool,
 ) -> bool:
@@ -717,27 +879,29 @@ def should_merge_base(
         else existing.project_task
     )
     new_project_value = (
-        new_record.project_display if merge_on_display_values else new_record.project
+        new_draft.project_display if merge_on_display_values else new_draft.project
     )
     new_project_task_value = (
-        new_record.project_task_display
+        new_draft.project_task_display
         if merge_on_display_values
-        else new_record.project_task
+        else new_draft.project_task
     )
 
     if (
-        existing.date != new_record.date
+        existing.date != new_draft.date
         or project_value != new_project_value
         or project_task_value != new_project_task_value
-        or existing.role != new_record.role
-        or existing.type != new_record.type
+        or existing.role != new_draft.role
+        or existing.type != new_draft.type
+        or existing.multiplier != new_draft.multiplier
+        or existing.absorbable != new_draft.absorbable
     ):
         return False
 
     if include_format_in_merge:
         return (
-            existing.annotation_delimiter == new_record.annotation_delimiter
-            and existing.output_separator == new_record.output_separator
+            existing.annotation_delimiter == new_draft.annotation_delimiter
+            and existing.output_separator == new_draft.output_separator
         )
 
     return True

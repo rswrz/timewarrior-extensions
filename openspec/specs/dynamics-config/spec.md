@@ -1,9 +1,7 @@
 ## Purpose
 
 Define how dynamics_* reports resolve configuration from defaults, Timewarrior header keys, and environment variables.
-
 ## Requirements
-
 ### Requirement: Configuration precedence
 The dynamics_* reports MUST resolve configuration in this order: built-in defaults, then Timewarrior header keys, then environment variables.
 
@@ -20,7 +18,7 @@ The dynamics_* reports MUST resolve configuration in this order: built-in defaul
 - **THEN** the resolved configuration uses the built-in default
 
 ### Requirement: Supported header keys
-The dynamics_* reports MUST read the following Timewarrior header keys when present: `reports.dynamics.config_file`, `reports.dynamics.annotation_delimiter`, `reports.dynamics.annotation_output_separator`, `reports.dynamics.exclude_tags`, and `reports.dynamics.llm.*`.
+The dynamics_* reports MUST read the following Timewarrior header keys when present: `reports.dynamics.config_file`, `reports.dynamics.annotation_delimiter`, `reports.dynamics.annotation_output_separator`, `reports.dynamics.exclude_tags`, `reports.dynamics.absorb_tag`, and `reports.dynamics.llm.*`.
 
 #### Scenario: Header provides a supported key
 - **WHEN** the Timewarrior report header contains any supported `reports.dynamics.*` key
@@ -54,3 +52,4 @@ The dynamics_* reports MUST resolve LLM settings from the effective `reports.dyn
 #### Scenario: LLM settings provided in environment
 - **WHEN** `TIMEWARRIOR_REPORTS_DYNAMICS_LLM_MODEL` is set in the environment
 - **THEN** the resolved configuration uses that model value
+

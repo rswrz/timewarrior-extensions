@@ -20,7 +20,7 @@ from summary_table_printer import (
 
 from dynamics_common import (
     DynamicsRecord,
-    build_dynamics_records,
+    build_dynamics_records_with_absorption_report,
     load_project_configuration,
     parse_timew_export,
     resolve_report_config,
@@ -100,6 +100,20 @@ def format_total_duration(total_minutes: int) -> str:
     return f"{hours}:{minutes:02d}:00"
 
 
+def format_seconds_compact(total_seconds: int) -> str:
+    total_seconds = int(total_seconds)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if seconds:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{hours}:{minutes:02d}"
+
+
+def format_minutes_hm(total_minutes: int) -> str:
+    hours, minutes = divmod(int(total_minutes), 60)
+    return f"{hours}:{minutes:02d}"
+
+
 def build_rows(records: Sequence[DynamicsRecord]) -> List[DynamicsRow]:
     rows: List[DynamicsRow] = []
     for record in records:
@@ -126,7 +140,7 @@ def main() -> None:
     config = resolve_report_config(report_config)
     project_configs = load_project_configuration(config.config_file)
 
-    dynamics_records = build_dynamics_records(
+    dynamics_records, absorption_report = build_dynamics_records_with_absorption_report(
         timew_entries,
         project_configs,
         config,
@@ -179,6 +193,20 @@ def main() -> None:
         row_style=row_highlight,
     )
     print_total(widths, total_minutes)
+
+    if config.absorb_tag and absorption_report:
+        print("\nAbsorption (absorb_tag: {})".format(config.absorb_tag))
+        for day in absorption_report:
+            base = (
+                f"{day.date}"
+                f"  slack {format_seconds_compact(day.slack_seconds)}"
+                f"  admin {format_seconds_compact(day.admin_raw_seconds)}"
+                f"  absorbed {format_seconds_compact(day.absorbed_seconds)}"
+                f"  leftover {format_seconds_compact(day.leftover_raw_seconds)}"
+            )
+            if day.leftover_raw_seconds > 0:
+                base += f"  exports {format_minutes_hm(day.leftover_exported_minutes)}"
+            print(base)
 
 
 if __name__ == "__main__":
