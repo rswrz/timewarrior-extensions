@@ -20,7 +20,9 @@ from summary_table_printer import (
 from overtime_common import (
     DaySummary,
     build_overtime_summaries,
-    format_minutes,
+    format_clock_hms,
+    format_duration_hms,
+    format_signed_duration_hms,
     load_config,
     parse_timew_export,
     read_report_header,
@@ -29,18 +31,6 @@ from overtime_common import (
 
 ANSI_RED = "\033[31m"
 ANSI_GREEN = "\033[32m"
-
-
-def format_overtime_minutes(minutes: int) -> str:
-    if minutes < 0:
-        sign = "-"
-    elif minutes > 0:
-        sign = "+"
-    else:
-        sign = ""
-    total = abs(minutes)
-    hours, remainder = divmod(total, 60)
-    return f"{sign}{hours}:{remainder:02d}"
 
 
 def build_rows(
@@ -58,22 +48,45 @@ def build_rows(
         )
         if last_week is None or day.week_label != last_week:
             week_total = 0
-        week_total += day.overtime_minutes
+        week_total += day.overtime_seconds
         next_day = days[index + 1] if index + 1 < len(days) else None
         is_week_end = next_day is None or next_day.week_label != day.week_label
         weekly_total = week_total if is_week_end else None
+        from_value = (
+            format_clock_hms(day.from_second_of_day)
+            if day.from_second_of_day is not None
+            else ""
+        )
+        to_value = (
+            format_clock_hms(day.to_second_of_day)
+            if day.to_second_of_day is not None
+            else ""
+        )
+        pause_value = (
+            format_duration_hms(day.pause_seconds)
+            if day.pause_seconds is not None
+            else ""
+        )
+
         rows.append(
             [
                 week_cell,
                 day.moment.strftime("%Y-%m-%d"),
                 day.weekday_label,
-                format_minutes(day.expected_minutes),
-                format_minutes(day.actual_minutes),
-                format_overtime_minutes(day.overtime_minutes),
-                format_overtime_minutes(weekly_total) if weekly_total is not None else "",
+                from_value,
+                to_value,
+                pause_value,
+                format_duration_hms(day.expected_seconds),
+                format_duration_hms(day.actual_seconds),
+                format_signed_duration_hms(day.overtime_seconds),
+                (
+                    format_signed_duration_hms(weekly_total)
+                    if weekly_total is not None
+                    else ""
+                ),
             ]
         )
-        overtime_values.append(day.overtime_minutes)
+        overtime_values.append(day.overtime_seconds)
         weekly_total_values.append(weekly_total)
         last_week = day.week_label
 
@@ -87,10 +100,13 @@ def build_total_row(
         "",
         "",
         "",
-        format_minutes(total_expected),
-        format_minutes(total_actual),
         "",
-        format_overtime_minutes(total_overtime),
+        "",
+        "",
+        format_duration_hms(total_expected),
+        format_duration_hms(total_actual),
+        "",
+        format_signed_duration_hms(total_overtime),
     ]
 
 
@@ -123,11 +139,25 @@ def main() -> None:
         end_date=end_date,
     )
 
-    headers = ["Wk", "Date", "Day", "Expected", "Actual", "Overtime", "Total"]
+    headers = [
+        "Wk",
+        "Date",
+        "Day",
+        "From",
+        "To",
+        "Pause",
+        "Expected",
+        "Actual",
+        "Overtime",
+        "Total",
+    ]
     columns = [
         ColumnSpec(align="<"),
         ColumnSpec(align="<"),
         ColumnSpec(align="<"),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">"),
+        ColumnSpec(align=">"),
         ColumnSpec(align=">"),
         ColumnSpec(align=">"),
         ColumnSpec(align=">"),
@@ -140,9 +170,9 @@ def main() -> None:
         return
 
     rows, overtime_values, weekly_total_values = build_rows(day_summaries)
-    total_actual = sum(day.actual_minutes for day in day_summaries)
-    total_expected = sum(day.expected_minutes for day in day_summaries)
-    total_overtime = sum(day.overtime_minutes for day in day_summaries)
+    total_actual = sum(day.actual_seconds for day in day_summaries)
+    total_expected = sum(day.expected_seconds for day in day_summaries)
+    total_overtime = sum(day.overtime_seconds for day in day_summaries)
     total_row = build_total_row(total_expected, total_actual, total_overtime)
     widths, _ = compute_widths(rows + [total_row], headers, columns, None)
     render_header(headers, widths, columns)
@@ -156,16 +186,16 @@ def main() -> None:
     ) -> Style | None:
         if line_index != 0:
             return None
-        minutes: Optional[int] = None
-        if col_index == 5:
-            minutes = overtime_values[row_index]
-        elif col_index == 6:
-            minutes = weekly_total_values[row_index]
-        if minutes is None:
+        seconds: Optional[int] = None
+        if col_index == 8:
+            seconds = overtime_values[row_index]
+        elif col_index == 9:
+            seconds = weekly_total_values[row_index]
+        if seconds is None:
             return None
-        if minutes < 0:
+        if seconds < 0:
             return Style(prefix=ANSI_RED, suffix=ANSI_FG_RESET)
-        if minutes > 0:
+        if seconds > 0:
             return Style(prefix=ANSI_GREEN, suffix=ANSI_FG_RESET)
         return None
 
@@ -186,7 +216,7 @@ def main() -> None:
         _row: Sequence[str],
         line_index: int,
     ) -> Style | None:
-        if col_index == 6 and line_index == 0:
+        if col_index == 9 and line_index == 0:
             return total_style
         return None
 

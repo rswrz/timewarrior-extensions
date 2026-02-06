@@ -10,7 +10,9 @@ from typing import List, Sequence
 from overtime_common import (
     DaySummary,
     build_overtime_summaries,
-    format_hours_decimal,
+    format_clock_hms,
+    format_duration_hms,
+    format_signed_duration_hms,
     load_config,
     parse_timew_export,
     read_report_header,
@@ -32,12 +34,30 @@ def format_row(values: Sequence[str]) -> str:
 def build_rows(days: Sequence[DaySummary]) -> List[List[str]]:
     rows: List[List[str]] = []
     for day in days:
+        from_value = (
+            format_clock_hms(day.from_second_of_day)
+            if day.from_second_of_day is not None
+            else ""
+        )
+        to_value = (
+            format_clock_hms(day.to_second_of_day)
+            if day.to_second_of_day is not None
+            else ""
+        )
+        pause_value = (
+            format_duration_hms(day.pause_seconds)
+            if day.pause_seconds is not None
+            else ""
+        )
         rows.append(
             [
                 day.moment.strftime("%Y-%m-%d"),
-                format_hours_decimal(day.expected_minutes),
-                format_hours_decimal(day.actual_minutes),
-                format_hours_decimal(day.overtime_minutes),
+                from_value,
+                to_value,
+                pause_value,
+                format_duration_hms(day.expected_seconds),
+                format_duration_hms(day.actual_seconds),
+                format_signed_duration_hms(day.overtime_seconds),
             ]
         )
     return rows
@@ -64,9 +84,12 @@ def main() -> None:
 
     header = [
         "Date",
-        "ExpectedHours",
-        "ActualHours",
-        "OvertimeHours",
+        "From",
+        "To",
+        "Pause",
+        "Expected",
+        "Actual",
+        "Overtime",
     ]
     sys.stdout.write(format_row(header) + "\n")
 

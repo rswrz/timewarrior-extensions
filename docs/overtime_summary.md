@@ -19,6 +19,9 @@ timew export :week | python3 overtime_summary.py
 
 - The `Overtime` column is signed (`+` for surplus, `-` for deficit).
 - Negative overtime is red and positive overtime is green when ANSI colors are supported.
+- `From` and `To` are clock times formatted as `HH:MM:SS`.
+- Duration fields (`Pause`, `Expected`, `Actual`, `Overtime`, `Total`) are formatted as `H:MM:SS`.
+- `Pause` is computed as the sum of gaps between tracked intervals within the day (active entries are ignored).
 
 ## Configuration
 

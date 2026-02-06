@@ -19,11 +19,16 @@ Example (conceptual):
 color: on
 confirmation: on
 debug: off
-temp.report.start: 20240901T000000Z
-temp.report.end: 20240908T000000Z
+journal.size: -1
+temp.db: ~/.timewarrior
+temp.extensions: ~/.timewarrior/extensions
+temp.report.end: 20380119T000000Z
+temp.report.start: 20380119T000000Z
+temp.report.tags: example,example2
+temp.version: 1.9.1
 verbose: on
 
-[{"id":1,"start":"20240901T083000Z","end":"20240901T093000Z","tags":["proj"],"annotation":"Note"}]
+[{"id":1,"start":"20380119T031206Z","end":"20380119T031407Z","tags":["example","example2"],"annotation":"This is an example"}]
 ```
 
 Notes:

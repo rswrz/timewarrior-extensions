@@ -38,9 +38,12 @@ class DaySummary:
     moment: date
     week_label: str
     weekday_label: str
-    actual_minutes: int
-    expected_minutes: int
-    overtime_minutes: int
+    from_second_of_day: Optional[int]
+    to_second_of_day: Optional[int]
+    pause_seconds: Optional[int]
+    actual_seconds: int
+    expected_seconds: int
+    overtime_seconds: int
 
 
 def read_report_header(stream: Iterable[str]) -> Dict[str, str]:
@@ -207,15 +210,64 @@ def effective_daily_hours(config: OvertimeConfig) -> float:
     return config.daily_hours
 
 
-def aggregate_actual_minutes(entries: Sequence[dict]) -> Dict[date, int]:
-    totals_seconds: Dict[date, float] = {}
+def format_clock_hms(seconds_of_day: int) -> str:
+    if seconds_of_day < 0:
+        seconds_of_day = 0
+    if seconds_of_day >= 24 * 3600:
+        return "24:00:00"
+    hours, remainder = divmod(seconds_of_day, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def format_duration_hms(seconds: int) -> str:
+    total = abs(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+
+def format_signed_duration_hms(seconds: int) -> str:
+    if seconds < 0:
+        sign = "-"
+    elif seconds > 0:
+        sign = "+"
+    else:
+        sign = ""
+    return f"{sign}{format_duration_hms(seconds)}"
+
+
+def _seconds_since_midnight(moment: datetime) -> int:
+    midnight = datetime.combine(moment.date(), time.min, tzinfo=moment.tzinfo)
+    return int((moment - midnight).total_seconds())
+
+
+def _to_second_of_day(day: date, moment: datetime) -> int:
+    if moment.date() > day and moment.time() == time.min:
+        return 24 * 3600
+    return _seconds_since_midnight(moment)
+
+
+def build_day_segments(entries: Sequence[dict]) -> Dict[date, List[Tuple[datetime, datetime]]]:
+    """Split ended entries into local-day segments.
+
+    Returns a mapping of day -> list of (start_local, end_local) segments, where
+    end_local may be a local midnight on the following date for segments that end
+    exactly at the day boundary.
+    """
+
+    segments: Dict[date, List[Tuple[datetime, datetime]]] = {}
 
     for entry in entries:
         if "end" not in entry:
             continue
 
-        start_dt = datetime.strptime(entry["start"], TIMEW_DATETIME_FORMAT)
-        end_dt = datetime.strptime(entry["end"], TIMEW_DATETIME_FORMAT)
+        try:
+            start_dt = datetime.strptime(entry["start"], TIMEW_DATETIME_FORMAT)
+            end_dt = datetime.strptime(entry["end"], TIMEW_DATETIME_FORMAT)
+        except (KeyError, ValueError):
+            continue
+
         start_local = start_dt.astimezone()
         end_local = end_dt.astimezone()
 
@@ -227,37 +279,56 @@ def aggregate_actual_minutes(entries: Sequence[dict]) -> Dict[date, int]:
             midnight = datetime.combine(
                 current.date() + timedelta(days=1), time.min, tzinfo=current.tzinfo
             )
-            delta = midnight - current
-            seconds = delta.total_seconds()
-            if seconds > 0:
-                totals_seconds[current.date()] = (
-                    totals_seconds.get(current.date(), 0.0) + seconds
-                )
+            if midnight > current:
+                segments.setdefault(current.date(), []).append((current, midnight))
             current = midnight
 
-        final_delta = end_local - current
-        seconds = final_delta.total_seconds()
+        if end_local > current:
+            segments.setdefault(current.date(), []).append((current, end_local))
+
+    return segments
+
+
+def _merge_intervals(
+    intervals: Sequence[Tuple[datetime, datetime]],
+) -> List[Tuple[datetime, datetime]]:
+    if not intervals:
+        return []
+
+    ordered = sorted(intervals, key=lambda pair: pair[0])
+    merged: List[Tuple[datetime, datetime]] = []
+    current_start, current_end = ordered[0]
+    for start, end in ordered[1:]:
+        if start <= current_end:
+            if end > current_end:
+                current_end = end
+        else:
+            merged.append((current_start, current_end))
+            current_start, current_end = start, end
+    merged.append((current_start, current_end))
+    return merged
+
+
+def _sum_interval_seconds(intervals: Sequence[Tuple[datetime, datetime]]) -> int:
+    total = 0
+    for start, end in intervals:
+        delta = end - start
+        seconds = int(delta.total_seconds())
         if seconds > 0:
-            totals_seconds[current.date()] = (
-                totals_seconds.get(current.date(), 0.0) + seconds
-            )
-
-    return {
-        day: int(total_seconds // 60)
-        for day, total_seconds in totals_seconds.items()
-        if total_seconds > 0
-    }
+            total += seconds
+    return total
 
 
-def format_minutes(minutes: int) -> str:
-    total = abs(minutes)
-    hours, remainder = divmod(total, 60)
-    return f"{hours}:{remainder:02d}"
-
-
-def format_hours_decimal(minutes: int) -> str:
-    hours = minutes / 60.0
-    return f"{hours:.2f}"
+def _pause_seconds(merged: Sequence[Tuple[datetime, datetime]]) -> int:
+    if len(merged) < 2:
+        return 0
+    pause = 0
+    for index in range(len(merged) - 1):
+        gap = merged[index + 1][0] - merged[index][1]
+        seconds = int(gap.total_seconds())
+        if seconds > 0:
+            pause += seconds
+    return pause
 
 
 def build_overtime_summaries(
@@ -266,7 +337,11 @@ def build_overtime_summaries(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> List[DaySummary]:
-    actual_by_date = aggregate_actual_minutes(entries)
+    segments_by_date = build_day_segments(entries)
+    actual_by_date = {
+        day: _sum_interval_seconds(day_segments)
+        for day, day_segments in segments_by_date.items()
+    }
     dates_in_scope = set(actual_by_date.keys())
 
     if not dates_in_scope and (start_date is None or end_date is None):
@@ -289,28 +364,43 @@ def build_overtime_summaries(
         cursor += timedelta(days=1)
 
     daily_hours = effective_daily_hours(config)
-    expected_minutes_per_day = int(round(daily_hours * 60))
+    expected_seconds_per_day = int(round(daily_hours * 3600))
 
     day_summaries: List[DaySummary] = []
 
     for current in date_range:
+        day_segments = segments_by_date.get(current, [])
         actual = actual_by_date.get(current, 0)
         is_work_day = current.isoweekday() in config.work_days
-        expected = expected_minutes_per_day if is_work_day else 0
+        expected = expected_seconds_per_day if is_work_day else 0
         overtime = actual - expected
 
         key = current.isocalendar().week
         if actual == 0 and expected == 0:
             continue
 
+        from_second: Optional[int] = None
+        to_second: Optional[int] = None
+        pause_seconds: Optional[int] = None
+        if day_segments:
+            merged = _merge_intervals(day_segments)
+            earliest_start = min(start for start, _end in merged)
+            latest_end = max(end for _start, end in merged)
+            from_second = _seconds_since_midnight(earliest_start)
+            to_second = _to_second_of_day(current, latest_end)
+            pause_seconds = _pause_seconds(merged)
+
         day_summaries.append(
             DaySummary(
                 moment=current,
                 week_label=f"W{key}",
                 weekday_label=current.strftime("%a"),
-                actual_minutes=actual,
-                expected_minutes=expected,
-                overtime_minutes=overtime,
+                from_second_of_day=from_second,
+                to_second_of_day=to_second,
+                pause_seconds=pause_seconds,
+                actual_seconds=actual,
+                expected_seconds=expected,
+                overtime_seconds=overtime,
             )
         )
 

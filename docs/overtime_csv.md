@@ -20,9 +20,12 @@ timew export :week | python3 overtime_csv.py > /tmp/overtime.csv
 Columns are double-quoted with embedded quotes escaped by doubling.
 
 1. `Date` — `YYYY-MM-DD`
-2. `ExpectedHours` — decimal hours
-3. `ActualHours` — decimal hours
-4. `OvertimeHours` — decimal hours
+2. `From` — `HH:MM:SS` (first tracked segment start, day-clamped)
+3. `To` — `HH:MM:SS` (last tracked segment end, day-clamped; may be `24:00:00`)
+4. `Pause` — `H:MM:SS` (sum of gaps between tracked intervals within the day)
+5. `Expected` — `H:MM:SS`
+6. `Actual` — `H:MM:SS`
+7. `Overtime` — signed `H:MM:SS` (`+`/`-` when non-zero)
 
 ## Configuration
 
